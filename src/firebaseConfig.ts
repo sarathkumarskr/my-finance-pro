@@ -7,7 +7,7 @@ import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAl5_gHq7j_4BYwKdh6o_dbGrk5oUy4wNU",
-  authDomain: "my-finance-pro-phi.vercel.app",
+  authDomain: "my-finance-pro-b115a.firebaseapp.com", // ✅ Firebase domain
   projectId: "my-finance-pro-b115a",
   storageBucket: "my-finance-pro-b115a.firebasestorage.app",
   messagingSenderId: "785519739079",
