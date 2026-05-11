@@ -1,13 +1,10 @@
 import { initializeApp } from 'firebase/app';
-import {
-  indexedDBLocalPersistence,
-  initializeAuth
-} from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAl5_gHq7j_4BYwKdh6o_dbGrk5oUy4wNU",
-  authDomain: "my-finance-pro-b115a.firebaseapp.com", // ✅ Firebase domain
+  authDomain: "my-finance-pro-b115a.firebaseapp.com",
   projectId: "my-finance-pro-b115a",
   storageBucket: "my-finance-pro-b115a.firebasestorage.app",
   messagingSenderId: "785519739079",
@@ -16,9 +13,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-export const auth = initializeAuth(app, {
-  persistence: indexedDBLocalPersistence
-});
-
+// ✅ getAuth — Simple, no argument errors
+export const auth = getAuth(app);
 export const db = getFirestore(app);
 export default app;

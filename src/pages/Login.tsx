@@ -1,13 +1,22 @@
-import { useState } from 'react';
-import { GoogleAuthProvider, signInWithRedirect, getRedirectResult } from 'firebase/auth';
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
+} from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 import toast from 'react-hot-toast';
 
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase());
+const isInStandaloneMode = () =>
+  window.matchMedia('(display-mode: standalone)').matches ||
+  (window.navigator as any).standalone === true;
+
 export default function Login() {
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  // ✅ Redirect result handle ചെയ്യൂ
   useEffect(() => {
     setLoading(true);
     getRedirectResult(auth)
@@ -17,27 +26,41 @@ export default function Login() {
         }
       })
       .catch((error) => {
-        console.error(error);
-        if (error.code !== 'auth/no-current-user') {
-          toast.error('Login failed. Try again.');
-        }
+        console.error('❌ Redirect error code:', error.code);
+        console.error('❌ Redirect error msg:', error.message);
+        setErrorMsg(error.code + ': ' + error.message);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const handleGoogleLogin = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+
     try {
-      setLoading(true);
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
-      
-      // ✅ Redirect use ചെയ്യൂ (Popup അല്ല)
-      await signInWithRedirect(auth, provider);
-    } catch (error) {
-      console.error(error);
-      toast.error('Login failed. Try again.');
+      const ios = isIOS();
+      const standalone = isInStandaloneMode();
+      console.log('📱 isIOS:', ios);
+      console.log('📱 isStandalone:', standalone);
+
+      if (ios) {
+        // iOS — always use redirect
+        console.log('🔄 Using signInWithRedirect...');
+        await signInWithRedirect(auth, provider);
+      } else {
+        // Desktop/Android — popup
+        console.log('🔄 Using signInWithPopup...');
+        const result = await signInWithPopup(auth, provider);
+        console.log('✅ Login success:', result.user.email);
+        toast.success(`Welcome ${result.user.displayName}!`);
+      }
+    } catch (error: any) {
+      console.error('❌ Login error code:', error.code);
+      console.error('❌ Login error message:', error.message);
+      setErrorMsg(error.code + ': ' + error.message);
+      toast.error('Login failed: ' + error.code);
       setLoading(false);
     }
   };
@@ -61,7 +84,6 @@ export default function Login() {
         border: '1px solid var(--border)',
         boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
       }}>
-        {/* Logo */}
         <div style={{
           width: '80px',
           height: '80px',
@@ -92,11 +114,26 @@ export default function Login() {
           lineHeight: '1.6',
         }}>
           Track income, expenses, debts, savings,
-          UAE/India finances, remittance and
-          payment modes in one secure PWA.
+          UAE/India finances & remittance.
         </p>
 
-        {/* Login Button */}
+        {/* Error Display — Debug */}
+        {errorMsg && (
+          <div style={{
+            background: 'rgba(255,0,0,0.1)',
+            border: '1px solid red',
+            borderRadius: '8px',
+            padding: '12px',
+            marginBottom: '16px',
+            fontSize: '12px',
+            color: 'red',
+            textAlign: 'left',
+            wordBreak: 'break-all',
+          }}>
+            ❌ {errorMsg}
+          </div>
+        )}
+
         <button
           onClick={handleGoogleLogin}
           disabled={loading}
@@ -114,7 +151,6 @@ export default function Login() {
             alignItems: 'center',
             justifyContent: 'center',
             gap: '10px',
-            transition: 'opacity 0.2s',
           }}
         >
           {loading ? (
@@ -142,20 +178,16 @@ export default function Login() {
           )}
         </button>
 
-        {/* Features */}
         <div style={{ marginTop: '32px', textAlign: 'left' }}>
           {[
             '🔒 Secure Google login',
-            '💱 AED + INR multi-currency tracking',
-            '🌍 Multi-country support',
+            '💱 AED + INR multi-currency',
+            '🌍 UAE & India support',
           ].map((feature, i) => (
             <div key={i} style={{
               color: 'var(--muted)',
               fontSize: '13px',
               padding: '6px 0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
             }}>
               {feature}
             </div>
