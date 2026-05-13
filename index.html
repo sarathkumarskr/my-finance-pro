@@ -2,17 +2,237 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#6366f1" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="My Finance Pro" />
-    <!-- ✅ webmanifest -->
+    
+    <!-- Viewport — Critical for mobile -->
+    <meta 
+      name="viewport" 
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
+    
+    <!-- ================================================ -->
+    <!-- PWA Core -->
+    <!-- ================================================ -->
     <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1f2e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#1a1f2e" media="(prefers-color-scheme: light)" />
+    
+    <!-- ================================================ -->
+    <!-- iOS PWA — Critical for iPhone/iPad -->
+    <!-- ================================================ -->
+    
+    <!-- Tell iOS this is a PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Finance Pro" />
+    
+    <!-- iOS Icons — All sizes needed -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png" />
+    
+    <!-- iOS Splash Screens — iPhone sizes -->
+    <!-- iPhone 14 Pro Max -->
+    <link 
+      rel="apple-touch-startup-image" 
+      href="/icons/splash-1290x2796.png"
+      media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)"
+    />
+    <!-- iPhone 14 Pro -->
+    <link 
+      rel="apple-touch-startup-image" 
+      href="/icons/splash-1179x2556.png"
+      media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)"
+    />
+    <!-- iPhone 14 / 13 / 12 -->
+    <link 
+      rel="apple-touch-startup-image" 
+      href="/icons/splash-1170x2532.png"
+      media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)"
+    />
+    <!-- iPhone SE -->
+    <link 
+      rel="apple-touch-startup-image" 
+      href="/icons/splash-750x1334.png"
+      media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)"
+    />
+    
+    <!-- ================================================ -->
+    <!-- Android / General -->
+    <!-- ================================================ -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Finance Pro" />
+    <meta name="msapplication-TileColor" content="#1a1f2e" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png" />
+    
+    <!-- ================================================ -->
+    <!-- SEO & Social -->
+    <!-- ================================================ -->
+    <meta name="description" content="Personal Finance Tracker for UAE & India Expats" />
+    <meta name="keywords" content="finance, expense tracker, UAE, India, expat, budget" />
+    <meta name="author" content="My Finance Pro" />
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="My Finance Pro" />
+    <meta property="og:description" content="Personal Finance Tracker for Expats" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://my-finance-pro-phi.vercel.app" />
+    <meta property="og:image" content="/icons/icon-512x512.png" />
+    
+    <!-- ================================================ -->
+    <!-- Favicons -->
+    <!-- ================================================ -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
+    <link rel="shortcut icon" href="/icons/favicon-32x32.png" />
+    
+    <!-- ================================================ -->
+    <!-- Performance -->
+    <!-- ================================================ -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://firestore.googleapis.com" />
+    <link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com" />
+    
     <title>My Finance Pro</title>
+    
+    <!-- ================================================ -->
+    <!-- Prevent flash of wrong theme -->
+    <!-- ================================================ -->
+    <style>
+      /* Critical CSS — Prevents white flash on load */
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        background-color: #1a1f2e;
+        min-height: 100%;
+        min-height: 100dvh; /* Dynamic viewport height */
+        overflow-x: hidden;
+      }
+      
+      /* iOS safe area support */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        /* Prevent overscroll bounce on iOS */
+        overscroll-behavior: none;
+        /* Smooth scrolling */
+        -webkit-overflow-scrolling: touch;
+      }
+      
+      /* Loading spinner shown before React loads */
+      #initial-loader {
+        position: fixed;
+        inset: 0;
+        background: #1a1f2e;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        gap: 16px;
+      }
+      
+      #initial-loader .logo {
+        width: 80px;
+        height: 80px;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      
+      #initial-loader p {
+        color: #6366f1;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      
+      #initial-loader .spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid rgba(99, 102, 241, 0.2);
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
+        50% { transform: scale(1.05); box-shadow: 0 0 0 12px rgba(99,102,241,0); }
+      }
+      
+      /* Hide scrollbars on mobile for native feel */
+      ::-webkit-scrollbar {
+        display: none;
+      }
+      
+      /* Disable text selection for app-like feel */
+      .no-select {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+    </style>
   </head>
-  <body>
+  <body class="no-select">
+    
+    <!-- Initial loader — shown before React hydrates -->
+    <div id="initial-loader">
+      <div class="logo">💰</div>
+      <p>My Finance Pro</p>
+      <div class="spinner"></div>
+    </div>
+    
+    <!-- React App Root -->
     <div id="root"></div>
+    
+    <!-- React entry -->
     <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- ================================================ -->
+    <!-- iOS Login Persistence Fix -->
+    <!-- IndexedDB warm-up to prevent Safari clearing storage -->
+    <!-- ================================================ -->
+    <script>
+      // Keep IndexedDB alive on iOS (prevents Firebase Auth logout)
+      (function() {
+        try {
+          const DB_NAME = 'firebase-auth-warmup';
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onsuccess = function() {
+            req.result.close();
+          };
+        } catch(e) {
+          // Silent fail
+        }
+      })();
+      
+      // Detect iOS PWA mode
+      window.isIOSPWA = (
+        window.navigator.standalone === true ||
+        window.matchMedia('(display-mode: standalone)').matches
+      );
+      
+      // Detect Android PWA mode
+      window.isAndroidPWA = (
+        window.matchMedia('(display-mode: standalone)').matches &&
+        /Android/.test(navigator.userAgent)
+      );
+      
+      console.log('[App] iOS PWA:', window.isIOSPWA);
+      console.log('[App] Android PWA:', window.isAndroidPWA);
+    </script>
   </body>
 </html>
