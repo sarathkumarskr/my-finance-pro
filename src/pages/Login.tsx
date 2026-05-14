@@ -1,148 +1,73 @@
-// ============================================================
-// My Finance Pro — Login Page
-// iOS PWA compatible Google Sign-In
-// ============================================================
-
 import React, { useState, useEffect } from 'react';
 import {
   signInWithPopup,
-  signInWithRedirect,
   getRedirectResult,
-  GoogleAuthProvider,
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebaseConfig';
 import toast from 'react-hot-toast';
 import { TrendingUp, Shield, Zap, Globe } from 'lucide-react';
 
-// User type (null for Login page since user is not logged in)
 type LoginProps = {
   user: null;
 };
 
-// ============================================================
-// Detect if running as installed PWA
-// ============================================================
-function isPWA(): boolean {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true ||
-    document.referrer.includes('android-app://')
-  );
-}
-
-// ============================================================
-// Detect iOS
-// ============================================================
-function isIOS(): boolean {
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
-
-// ============================================================
-// Login Component
-// ============================================================
 export default function Login({ user }: LoginProps) {
   const [loading, setLoading] = useState(false);
   const [checkingRedirect, setCheckingRedirect] = useState(true);
 
-  // ============================================================
-  // Handle redirect result on page load
-  // This is called when returning from Google OAuth redirect
-  // CRITICAL for iOS PWA where popup doesn't work well
-  // ============================================================
   useEffect(() => {
     async function handleRedirectResult() {
       try {
         const result = await getRedirectResult(auth);
         if (result?.user) {
-          toast.success(`Welcome back, ${result.user.displayName?.split(' ')[0]}! 👋`);
-          // Auth state change will handle navigation via App.tsx
+          toast.success(
+            `Welcome back, ${result.user.displayName?.split(' ')[0]}! 👋`
+          );
         }
       } catch (error: any) {
-        console.error('[Login] Redirect result error:', error);
-        
-        if (error.code === 'auth/popup-blocked') {
-          toast.error('Popup blocked. Please allow popups or try again.');
-        } else if (error.code !== 'auth/no-auth-event') {
-          // auth/no-auth-event is normal (no redirect happened)
-          toast.error('Sign-in failed. Please try again.');
-        }
+        console.error('[Login] Redirect error:', error);
       } finally {
         setCheckingRedirect(false);
       }
     }
-
     handleRedirectResult();
   }, []);
 
-  // ============================================================
-  // Google Sign In — Smart strategy based on platform
-  // ============================================================
   async function handleGoogleSignIn() {
     if (loading) return;
     setLoading(true);
 
     try {
-      const useRedirect = isIOS() || isPWA();
-      // iOS PWA: use redirect (popup blocked by Safari in standalone mode)
-      // Android PWA + Desktop: popup works fine
-      
-      if (useRedirect) {
-        console.log('[Login] Using redirect sign-in (iOS/PWA)');
-        await signInWithRedirect(auth, googleProvider);
-        // Page will redirect to Google, then return
-        // getRedirectResult() handles the response
-      } else {
-        console.log('[Login] Using popup sign-in');
-        const result = await signInWithPopup(auth, googleProvider);
-        if (result.user) {
-          toast.success(`Welcome, ${result.user.displayName?.split(' ')[0]}! 👋`);
-        }
+      console.log('[Login] Starting Google Sign In...');
+      console.log('[Login] Auth object:', auth);
+      console.log('[Login] Provider object:', googleProvider);
+
+      const result = await signInWithPopup(auth, googleProvider);
+
+      if (result.user) {
+        toast.success(
+          `Welcome, ${result.user.displayName?.split(' ')[0]}! 👋`
+        );
       }
     } catch (error: any) {
-      console.error('[Login] Sign-in error:', error);
-      setLoading(false);
+      console.error('[Login] Full error:', error);
+      console.error('[Login] Error code:', error.code);
+      console.error('[Login] Error message:', error.message);
 
-      switch (error.code) {
-        case 'auth/popup-closed-by-user':
-          // User closed popup — not an error
-          break;
-        case 'auth/popup-blocked':
-          // Popup blocked — retry with redirect
-          toast.loading('Retrying with redirect...', { duration: 2000 });
-          setTimeout(async () => {
-            try {
-              await signInWithRedirect(auth, googleProvider);
-            } catch (e) {
-              toast.error('Sign-in failed. Please try again.');
-            }
-          }, 2000);
-          break;
-        case 'auth/network-request-failed':
-          toast.error('No internet connection. Please check your network.');
-          break;
-        case 'auth/too-many-requests':
-          toast.error('Too many attempts. Please wait a moment.');
-          break;
-        case 'auth/cancelled-popup-request':
-          // Multiple popups — ignore
-          break;
-        default:
-          toast.error(`Sign-in failed: ${error.message || 'Unknown error'}`);
-      }
-    } finally {
-      // Only reset if not redirecting
-      if (!isIOS() && !isPWA()) {
+      if (
+        error.code === 'auth/popup-closed-by-user' ||
+        error.code === 'auth/cancelled-popup-request'
+      ) {
         setLoading(false);
+        return;
       }
+
+      toast.error(`Sign-in failed: ${error.code || error.message}`);
+    } finally {
+      setLoading(false);
     }
   }
 
-  // ============================================================
-  // Feature list
-  // ============================================================
   const features = [
     {
       icon: <TrendingUp size={20} color="#6366f1" />,
@@ -166,9 +91,6 @@ export default function Login({ user }: LoginProps) {
     },
   ];
 
-  // ============================================================
-  // Show loading while checking redirect result
-  // ============================================================
   if (checkingRedirect) {
     return (
       <div
@@ -192,35 +114,42 @@ export default function Login({ user }: LoginProps) {
             animation: 'spin 0.8s linear infinite',
           }}
         />
-        <p style={{ color: '#6366f1', fontSize: '14px', margin: 0 }}>
-          Signing you in...
+        <p
+          style={{
+            color: '#6366f1',
+            fontSize: '14px',
+            margin: 0,
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          }}
+        >
+          Loading...
         </p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <style>
+          {`@keyframes spin { to { transform: rotate(360deg); } }`}
+        </style>
       </div>
     );
   }
 
-  // ============================================================
-  // Render Login UI
-  // ============================================================
   return (
     <div
       style={{
         minHeight: '100dvh',
-        background: 'linear-gradient(135deg, #0f1219 0%, #1a1f2e 50%, #0f1630 100%)',
+        background:
+          'linear-gradient(135deg, #0f1219 0%, #1a1f2e 50%, #0f1630 100%)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '24px',
-        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 24px)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily:
+          "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         position: 'relative',
         overflow: 'hidden',
       }}
     >
-      {/* Background decorations */}
+      {/* Background blobs */}
       <div
         style={{
           position: 'absolute',
@@ -228,7 +157,8 @@ export default function Login({ user }: LoginProps) {
           right: '-100px',
           width: '300px',
           height: '300px',
-          background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)',
+          background:
+            'radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)',
           pointerEvents: 'none',
         }}
       />
@@ -239,12 +169,13 @@ export default function Login({ user }: LoginProps) {
           left: '-100px',
           width: '300px',
           height: '300px',
-          background: 'radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)',
+          background:
+            'radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)',
           pointerEvents: 'none',
         }}
       />
 
-      {/* Content Card */}
+      {/* Main Content */}
       <div
         style={{
           width: '100%',
@@ -295,12 +226,18 @@ export default function Login({ user }: LoginProps) {
             }}
           >
             Personal finance tracker for{' '}
-            <span style={{ color: '#6366f1', fontWeight: '600' }}>UAE</span> &{' '}
-            <span style={{ color: '#10b981', fontWeight: '600' }}>India</span> expats
+            <span style={{ color: '#6366f1', fontWeight: '600' }}>
+              UAE
+            </span>{' '}
+            &{' '}
+            <span style={{ color: '#10b981', fontWeight: '600' }}>
+              India
+            </span>{' '}
+            expats
           </p>
         </div>
 
-        {/* Feature Grid */}
+        {/* Features Grid */}
         <div
           style={{
             display: 'grid',
@@ -348,9 +285,15 @@ export default function Login({ user }: LoginProps) {
           ))}
         </div>
 
-        {/* Sign In Section */}
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Google Sign In Button */}
+        {/* Sign In Button */}
+        <div
+          style={{
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+          }}
+        >
           <button
             onClick={handleGoogleSignIn}
             disabled={loading}
@@ -370,10 +313,12 @@ export default function Login({ user }: LoginProps) {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '12px',
-              transition: 'all 0.2s ease',
-              boxShadow: loading ? 'none' : '0 8px 32px rgba(99,102,241,0.4)',
+              boxShadow: loading
+                ? 'none'
+                : '0 8px 32px rgba(99,102,241,0.4)',
               letterSpacing: '0.3px',
               WebkitTapHighlightColor: 'transparent',
+              transition: 'all 0.2s ease',
             }}
           >
             {loading ? (
@@ -388,12 +333,16 @@ export default function Login({ user }: LoginProps) {
                     animation: 'spin 0.8s linear infinite',
                   }}
                 />
-                {isIOS() || isPWA() ? 'Redirecting...' : 'Signing in...'}
+                Signing in...
               </>
             ) : (
               <>
-                {/* Google Logo SVG */}
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
                   <path
                     d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
                     fill="#4285F4"
@@ -416,22 +365,6 @@ export default function Login({ user }: LoginProps) {
             )}
           </button>
 
-          {/* iOS/PWA Notice */}
-          {(isIOS() || isPWA()) && (
-            <p
-              style={{
-                textAlign: 'center',
-                fontSize: '12px',
-                color: '#475569',
-                margin: 0,
-                lineHeight: '1.5',
-              }}
-            >
-              🔒 You'll be redirected to Google to sign in securely
-            </p>
-          )}
-
-          {/* Terms */}
           <p
             style={{
               textAlign: 'center',
@@ -441,15 +374,15 @@ export default function Login({ user }: LoginProps) {
               lineHeight: '1.6',
             }}
           >
-            By continuing, you agree to our Terms of Service and Privacy Policy.
-            Your financial data is encrypted and private.
+            By continuing, you agree to our Terms of Service and Privacy
+            Policy. Your financial data is encrypted and private.
           </p>
         </div>
       </div>
 
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+      <style>
+        {`@keyframes spin { to { transform: rotate(360deg); } }`}
+      </style>
     </div>
   );
 }
