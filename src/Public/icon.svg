@@ -1,0 +1,86 @@
+node -e "
+const fs = require('fs');
+
+if (!fs.existsSync('public/icons')) {
+  fs.mkdirSync('public/icons', { recursive: true });
+}
+
+// Simple PNG header + data for a purple square icon
+// This creates a valid minimal PNG
+function createSimplePNG(size) {
+  const { createCanvas } = require('canvas');
+  // canvas not available, using SVG instead
+}
+
+// Create SVG icons that browsers can use
+const svgIcon = (size) => \`<svg xmlns='http://www.w3.org/2000/svg' width='\${size}' height='\${size}' viewBox='0 0 \${size} \${size}'>
+  <defs>
+    <linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'>
+      <stop offset='0%' style='stop-color:#6366f1'/>
+      <stop offset='100%' style='stop-color:#8b5cf6'/>
+    </linearGradient>
+  </defs>
+  <rect width='\${size}' height='\${size}' rx='\${size*0.18}' fill='url(#g)'/>
+  <text x='50%' y='62%' font-size='\${size*0.5}' text-anchor='middle' dominant-baseline='middle' fill='white'>💰</text>
+</svg>\`;
+
+const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+sizes.forEach(s => {
+  fs.writeFileSync(\`public/icons/icon-\${s}x\${s}.svg\`, svgIcon(s));
+  console.log(\`Created: icon-\${s}x\${s}.svg\`);
+});
+
+fs.writeFileSync('public/icons/apple-touch-icon.svg', svgIcon(180));
+console.log('Created: apple-touch-icon.svg');
+console.log('Done!');
+"
+SVG Icons — manifest.webmanifest Update
+public/manifest.webmanifest — Ctrl+A → Delete → Paste:
+
+JSON
+
+{
+  "name": "My Finance Pro",
+  "short_name": "Finance Pro",
+  "description": "Personal Finance Tracker for UAE & India Expats",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0f1219",
+  "background_color": "#0f1219",
+  "lang": "en",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/",
+      "icons": [{ "src": "/icons/icon-96x96.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Add Expense",
+      "url": "/expenses",
+      "icons": [{ "src": "/icons/icon-96x96.svg", "sizes": "96x96" }]
+    }
+  ]
+}
