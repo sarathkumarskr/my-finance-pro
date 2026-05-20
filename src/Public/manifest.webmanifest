@@ -5,13 +5,9 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait-primary",
   "theme_color": "#0f1219",
   "background_color": "#0f1219",
-  "lang": "en",
-  "dir": "ltr",
-  "categories": ["finance", "productivity"],
   "prefer_related_applications": false,
   "icons": [
     {
@@ -33,4 +29,4 @@
       "purpose": "maskable"
     }
   ]
-} 
+}
