@@ -5,6 +5,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import App from './App';
 import './index.css';
 
@@ -12,22 +13,20 @@ import './index.css';
 // Service Worker Registration
 // ============================================================
 async function registerServiceWorker() {
-  // Only register in production & if browser supports it
   if (!('serviceWorker' in navigator)) {
-    console.log('[SW] Service Workers not supported');
+    console.log('[SW] Not supported');
     return;
   }
 
   try {
     const registration = await navigator.serviceWorker.register('/sw.js', {
       scope: '/',
-      // Update SW when user navigates (good for PWA updates)
       updateViaCache: 'none',
     });
 
-    console.log('[SW] Registered successfully:', registration.scope);
+    console.log('[SW] Registered:', registration.scope);
 
-    // Check for SW updates
+    // Handle updates
     registration.addEventListener('updatefound', () => {
       const newWorker = registration.installing;
       if (!newWorker) return;
@@ -37,25 +36,57 @@ async function registerServiceWorker() {
           newWorker.state === 'installed' &&
           navigator.serviceWorker.controller
         ) {
-          // New version available — show update notification
-          console.log('[SW] New version available!');
+          console.log('[SW] Update available');
           
-          // You can dispatch a custom event here to show update banner
-          window.dispatchEvent(new CustomEvent('sw-update-available'));
+          // Show update toast
+          toast(
+            (t) => {
+              const div = document.createElement('div');
+              return React.createElement(
+                'div',
+                {
+                  style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }
+                },
+                React.createElement('span', null, '🔄 App updated!'),
+                React.createElement(
+                  'button',
+                  {
+                    onClick: () => {
+                      newWorker.postMessage('SKIP_WAITING');
+                      window.location.reload();
+                    },
+                    style: {
+                      background: '#6366f1',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                    }
+                  },
+                  'Refresh'
+                )
+              );
+            },
+            { duration: 8000 }
+          );
         }
       });
     });
 
-    // Handle SW controller change (after update)
+    // Controller change = new SW active
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      console.log('[SW] Controller changed — new version active');
-      // Optional: window.location.reload();
+      console.log('[SW] New version active');
     });
 
-    // Immediate update check
-    registration.update().catch(() => {
-      // Silent fail if offline
-    });
+    // Check for updates
+    registration.update().catch(() => {});
 
   } catch (error) {
     console.error('[SW] Registration failed:', error);
@@ -67,23 +98,23 @@ async function registerServiceWorker() {
 // ============================================================
 function removeInitialLoader() {
   const loader = document.getElementById('initial-loader');
-  if (loader) {
-    loader.style.transition = 'opacity 0.3s ease';
-    loader.style.opacity = '0';
-    setTimeout(() => {
-      loader.remove();
-    }, 300);
-  }
+  if (!loader) return;
+  
+  loader.style.transition = 'opacity 0.4s ease';
+  loader.style.opacity = '0';
+  
+  setTimeout(() => {
+    loader.remove();
+  }, 400);
 }
 
 // ============================================================
 // App Initialization
 // ============================================================
 async function initApp() {
-  // Register SW first (non-blocking)
+  // Register SW (non-blocking)
   registerServiceWorker();
 
-  // Mount React App
   const rootElement = document.getElementById('root');
   if (!rootElement) throw new Error('Root element not found');
 
