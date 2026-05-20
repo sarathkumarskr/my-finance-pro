@@ -9,6 +9,7 @@ import {
   Plus, ChevronLeft, ChevronRight, Edit2, Trash2,
   Check, Banknote, CreditCard, TrendingUp,
   AlertTriangle, X, Save, Copy, Flag, Wallet,
+  PiggyBank, ShoppingBag,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -17,6 +18,17 @@ import toast from 'react-hot-toast';
 type Country = 'UAE' | 'India';
 type Currency = 'AED' | 'INR';
 type PaymentType = 'cash' | 'credit' | 'tabby';
+type CategoryType = 'savings' | 'expense';
+
+type SavingsCategory =
+  | 'home_loan_emi' | 'car_loan_emi' | 'personal_loan_emi'
+  | 'chitti_kuri' | 'mutual_fund_sip' | 'recurring_deposit'
+  | 'fixed_deposit' | 'gold_savings' | 'ppf_nps' | 'other_savings';
+
+type ExpenseCategory =
+  | 'rent' | 'food_groceries' | 'utilities' | 'transport'
+  | 'healthcare' | 'education' | 'entertainment'
+  | 'shopping' | 'remittance' | 'other_expense';
 
 type BudgetItem = {
   id?: string;
@@ -29,6 +41,9 @@ type BudgetItem = {
   startMonth: string;
   endMonth: string | null;
   isActive: boolean;
+  categoryType: CategoryType;
+  savingsCategory?: SavingsCategory;
+  expenseCategory?: ExpenseCategory;
   createdAt?: any;
 };
 
@@ -55,6 +70,34 @@ type BudgetIncome = {
   updatedAt?: any;
 };
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const SAVINGS_CATEGORIES: { value: SavingsCategory; label: string; icon: string }[] = [
+  { value: 'home_loan_emi',     label: 'Home Loan EMI',      icon: '🏠' },
+  { value: 'car_loan_emi',      label: 'Car Loan EMI',       icon: '🚗' },
+  { value: 'personal_loan_emi', label: 'Personal Loan EMI',  icon: '💳' },
+  { value: 'chitti_kuri',       label: 'Chitti / Kuri',      icon: '🤝' },
+  { value: 'mutual_fund_sip',   label: 'Mutual Fund / SIP',  icon: '📈' },
+  { value: 'recurring_deposit', label: 'Recurring Deposit',  icon: '🏦' },
+  { value: 'fixed_deposit',     label: 'Fixed Deposit',      icon: '🔒' },
+  { value: 'gold_savings',      label: 'Gold Savings',       icon: '🪙' },
+  { value: 'ppf_nps',           label: 'PPF / NPS',          icon: '🛡️' },
+  { value: 'other_savings',     label: 'Other Savings',      icon: '💰' },
+];
+
+const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string; icon: string }[] = [
+  { value: 'rent',          label: 'Rent',             icon: '🏠' },
+  { value: 'food_groceries',label: 'Food & Groceries', icon: '🛒' },
+  { value: 'utilities',     label: 'Utilities',        icon: '💡' },
+  { value: 'transport',     label: 'Transport',        icon: '🚌' },
+  { value: 'healthcare',    label: 'Healthcare',       icon: '🏥' },
+  { value: 'education',     label: 'Education',        icon: '📚' },
+  { value: 'entertainment', label: 'Entertainment',    icon: '🎬' },
+  { value: 'shopping',      label: 'Shopping',         icon: '🛍️' },
+  { value: 'remittance',    label: 'Remittance',       icon: '💸' },
+  { value: 'other_expense', label: 'Other Expense',    icon: '📦' },
+];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
@@ -67,8 +110,8 @@ const addMonths = (month: string, n: number) => {
 
 const getMonthLabel = (month: string) => {
   const [y, m] = month.split('-');
-  const date = new Date(parseInt(y), parseInt(m) - 1, 1);
-  return date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  return new Date(parseInt(y), parseInt(m) - 1, 1)
+    .toLocaleString('en-US', { month: 'long', year: 'numeric' });
 };
 
 const formatAmt = (amount: number, currency: Currency) =>
@@ -83,7 +126,7 @@ const paymentColor = (type: PaymentType) => {
 };
 
 const paymentLabel = (type: PaymentType) => {
-  if (type === 'cash') return '💵 Cash';
+  if (type === 'cash') return '💵 Cash/Bank';
   if (type === 'credit') return '💳 Credit';
   return '🟣 Tabby';
 };
@@ -95,7 +138,13 @@ const isItemActiveInMonth = (item: BudgetItem, month: string): boolean => {
   return true;
 };
 
-// ─── Add/Edit Modal ───────────────────────────────────────────────────────────
+const getSavingsCategoryInfo = (val?: SavingsCategory) =>
+  SAVINGS_CATEGORIES.find((c) => c.value === val);
+
+const getExpenseCategoryInfo = (val?: ExpenseCategory) =>
+  EXPENSE_CATEGORIES.find((c) => c.value === val);
+
+// ─── Item Modal ───────────────────────────────────────────────────────────────
 
 function ItemModal({
   userId, country, currentMonth, editItem, onClose,
@@ -111,6 +160,15 @@ function ItemModal({
   const [paymentType, setPaymentType] = useState<PaymentType>(editItem?.paymentType || 'cash');
   const [startMonth, setStartMonth] = useState(editItem?.startMonth || currentMonth);
   const [endMonth, setEndMonth] = useState(editItem?.endMonth || '');
+  const [categoryType, setCategoryType] = useState<CategoryType>(
+    editItem?.categoryType || 'expense'
+  );
+  const [savingsCategory, setSavingsCategory] = useState<SavingsCategory>(
+    editItem?.savingsCategory || 'other_savings'
+  );
+  const [expenseCategory, setExpenseCategory] = useState<ExpenseCategory>(
+    editItem?.expenseCategory || 'other_expense'
+  );
   const [saving, setSaving] = useState(false);
   const currency: Currency = country === 'UAE' ? 'AED' : 'INR';
 
@@ -119,16 +177,21 @@ function ItemModal({
     if (!amount || isNaN(Number(amount))) { toast.error('Valid amount required'); return; }
     setSaving(true);
     try {
-      const data = {
+      const data: Omit<BudgetItem, 'id' | 'createdAt'> = {
         userId, country, name: name.trim(), paymentType,
         defaultAmount: Number(amount), currency,
-        startMonth, endMonth: endMonth || null, isActive: true,
+        startMonth, endMonth: endMonth || null,
+        isActive: true, categoryType,
+        savingsCategory: categoryType === 'savings' ? savingsCategory : undefined,
+        expenseCategory: categoryType === 'expense' ? expenseCategory : undefined,
       };
       if (editItem?.id) {
         await updateDoc(doc(db, 'budgetItems', editItem.id), data);
         toast.success('Updated!');
       } else {
-        await addDoc(collection(db, 'budgetItems'), { ...data, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'budgetItems'), {
+          ...data, createdAt: serverTimestamp(),
+        });
         toast.success('Added!');
       }
       onClose();
@@ -140,59 +203,132 @@ function ItemModal({
     }
   };
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '10px 12px', borderRadius: '8px',
+    border: '1px solid var(--border)', background: 'var(--bg)',
+    color: 'var(--text)', fontSize: '14px', outline: 'none',
+    boxSizing: 'border-box',
+  };
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', color: 'var(--muted)',
+    display: 'block', marginBottom: '6px', fontWeight: 600,
+  };
+
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1000, padding: '16px',
     }}>
-      <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div className="card" style={{
+        width: '100%', maxWidth: '460px',
+        padding: '24px', maxHeight: '90vh', overflowY: 'auto',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', marginBottom: '20px',
+        }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>
-            {editItem ? 'Edit' : `Add ${country} Item`}
+            {editItem ? 'Edit Item' : `Add ${country} Item`}
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none',
+            cursor: 'pointer', color: 'var(--muted)',
+          }}>
             <X size={20} />
           </button>
         </div>
 
-        {/* Name */}
-        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-          Description *
+        {/* Category Type Toggle */}
+        <label style={labelStyle}>Category Type</label>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          {([
+            { val: 'expense', label: '🔴 Expense', color: 'var(--danger)' },
+            { val: 'savings', label: '💰 Savings', color: 'var(--success)' },
+          ] as const).map(({ val, label, color }) => (
+            <button
+              key={val}
+              onClick={() => setCategoryType(val)}
+              style={{
+                flex: 1, padding: '10px', borderRadius: '10px',
+                border: `2px solid ${categoryType === val ? color : 'var(--border)'}`,
+                background: categoryType === val ? color + '18' : 'var(--bg)',
+                color: categoryType === val ? color : 'var(--muted)',
+                cursor: 'pointer', fontSize: '13px', fontWeight: 700,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Sub Category */}
+        <label style={labelStyle}>
+          {categoryType === 'savings' ? 'Savings Type' : 'Expense Category'}
         </label>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: '6px', marginBottom: '16px',
+        }}>
+          {(categoryType === 'savings' ? SAVINGS_CATEGORIES : EXPENSE_CATEGORIES).map((cat) => {
+            const isSelected = categoryType === 'savings'
+              ? savingsCategory === cat.value
+              : expenseCategory === cat.value;
+            return (
+              <button
+                key={cat.value}
+                onClick={() => {
+                  if (categoryType === 'savings') {
+                    setSavingsCategory(cat.value as SavingsCategory);
+                  } else {
+                    setExpenseCategory(cat.value as ExpenseCategory);
+                  }
+                }}
+                style={{
+                  padding: '8px 10px', borderRadius: '8px', textAlign: 'left',
+                  border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
+                  background: isSelected ? 'var(--primary)18' : 'var(--bg)',
+                  color: isSelected ? 'var(--primary)' : 'var(--muted)',
+                  cursor: 'pointer', fontSize: '12px', fontWeight: isSelected ? 700 : 400,
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                }}
+              >
+                <span>{cat.icon}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {cat.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Name */}
+        <label style={labelStyle}>Description *</label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. India Remittance, Rent, BOTIM"
-          style={{
-            width: '100%', padding: '10px 12px', borderRadius: '8px',
-            border: '1px solid var(--border)', background: 'var(--bg)',
-            color: 'var(--text)', fontSize: '14px', outline: 'none',
-            boxSizing: 'border-box', marginBottom: '14px',
-          }}
+          placeholder={
+            categoryType === 'savings'
+              ? 'e.g. SBI Home Loan, Muthoot Chitti'
+              : 'e.g. Rent, DEWA Bill, School Fees'
+          }
+          style={{ ...inputStyle, marginBottom: '14px' }}
         />
 
         {/* Amount */}
-        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-          Default Amount ({currency}) *
-        </label>
+        <label style={labelStyle}>Default Amount ({currency}) *</label>
         <input
           type="number"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
-          style={{
-            width: '100%', padding: '10px 12px', borderRadius: '8px',
-            border: '1px solid var(--border)', background: 'var(--bg)',
-            color: 'var(--text)', fontSize: '14px', outline: 'none',
-            boxSizing: 'border-box', marginBottom: '14px',
-          }}
+          style={{ ...inputStyle, marginBottom: '14px' }}
         />
 
         {/* Payment Type */}
-        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-          Payment Method
-        </label>
+        <label style={labelStyle}>Payment Method</label>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
           {(['cash', 'credit', 'tabby'] as PaymentType[]).map((pt) => (
             <button
@@ -203,7 +339,7 @@ function ItemModal({
                 border: `2px solid ${paymentType === pt ? paymentColor(pt) : 'var(--border)'}`,
                 background: paymentType === pt ? paymentColor(pt) + '18' : 'var(--bg)',
                 color: paymentType === pt ? paymentColor(pt) : 'var(--muted)',
-                cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+                cursor: 'pointer', fontSize: '11px', fontWeight: 600,
               }}
             >
               {paymentLabel(pt)}
@@ -212,37 +348,24 @@ function ItemModal({
         </div>
 
         {/* Start / End Month */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: '10px', marginBottom: '20px',
+        }}>
           <div>
-            <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-              Start Month
-            </label>
+            <label style={labelStyle}>Start Month</label>
             <input
-              type="month"
-              value={startMonth}
+              type="month" value={startMonth}
               onChange={(e) => setStartMonth(e.target.value)}
-              style={{
-                width: '100%', padding: '8px', borderRadius: '8px',
-                border: '1px solid var(--border)', background: 'var(--bg)',
-                color: 'var(--text)', fontSize: '13px', outline: 'none',
-                boxSizing: 'border-box',
-              }}
+              style={{ ...inputStyle }}
             />
           </div>
           <div>
-            <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-              End Month (optional)
-            </label>
+            <label style={labelStyle}>End Month (optional)</label>
             <input
-              type="month"
-              value={endMonth}
+              type="month" value={endMonth}
               onChange={(e) => setEndMonth(e.target.value)}
-              style={{
-                width: '100%', padding: '8px', borderRadius: '8px',
-                border: '1px solid var(--border)', background: 'var(--bg)',
-                color: 'var(--text)', fontSize: '13px', outline: 'none',
-                boxSizing: 'border-box',
-              }}
+              style={{ ...inputStyle }}
             />
           </div>
         </div>
@@ -266,9 +389,8 @@ function ItemModal({
               flex: 2, padding: '10px', borderRadius: '8px',
               border: 'none', background: 'var(--primary)', color: '#fff',
               cursor: saving ? 'not-allowed' : 'pointer',
-              fontSize: '14px', fontWeight: 600,
+              fontSize: '14px', fontWeight: 600, opacity: saving ? 0.7 : 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-              opacity: saving ? 0.7 : 1,
             }}
           >
             <Save size={15} />
@@ -300,23 +422,25 @@ function ItemRow({
   const effectiveAmount = override?.amount ?? item.defaultAmount;
   const isPaid = override?.isPaid ?? false;
 
+  const catInfo = item.categoryType === 'savings'
+    ? getSavingsCategoryInfo(item.savingsCategory)
+    : getExpenseCategoryInfo(item.expenseCategory);
+
   const handleTogglePaid = async () => {
     setSaving(true);
     try {
       const data = {
         userId, budgetItemId: item.id!, month,
-        amount: effectiveAmount,
-        isPaid: !isPaid,
+        amount: effectiveAmount, isPaid: !isPaid,
         paidDate: !isPaid ? new Date().toISOString().slice(0, 10) : null,
-        note: override?.note ?? null,
-        updatedAt: serverTimestamp(),
+        note: override?.note ?? null, updatedAt: serverTimestamp(),
       };
       if (override?.id) {
         await updateDoc(doc(db, 'budgetMonthOverrides', override.id), data);
       } else {
         await addDoc(collection(db, 'budgetMonthOverrides'), data);
       }
-      toast.success(isPaid ? 'Marked pending' : '✅ Marked paid!');
+      toast.success(isPaid ? 'Marked pending' : '✅ Paid!');
     } catch (e) {
       console.error(e);
       toast.error('Failed');
@@ -359,8 +483,8 @@ function ItemRow({
     <div style={{
       display: 'flex', alignItems: 'center', gap: '8px',
       padding: '10px 12px', borderRadius: '10px',
-      background: isPaid ? '#f0fdf4' : 'var(--bg)',
-      border: `1px solid ${isPaid ? '#bbf7d0' : 'var(--border)'}`,
+      background: isPaid ? 'rgba(16,185,129,0.06)' : 'var(--bg)',
+      border: `1px solid ${isPaid ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
       marginBottom: '8px',
     }}>
       {/* Paid toggle */}
@@ -377,6 +501,11 @@ function ItemRow({
         {isPaid && <Check size={13} color="#fff" />}
       </button>
 
+      {/* Category icon */}
+      {catInfo && (
+        <span style={{ fontSize: '16px', flexShrink: 0 }}>{catInfo.icon}</span>
+      )}
+
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
@@ -387,13 +516,21 @@ function ItemRow({
         }}>
           {item.name}
           {item.endMonth && (
-            <span style={{ fontSize: '10px', color: 'var(--warning)', marginLeft: '6px', fontWeight: 400 }}>
+            <span style={{
+              fontSize: '10px', color: 'var(--warning)',
+              marginLeft: '6px', fontWeight: 400,
+            }}>
               ends {item.endMonth}
             </span>
           )}
         </div>
         <div style={{ fontSize: '11px', color: paymentColor(item.paymentType), marginTop: '1px' }}>
           {paymentLabel(item.paymentType)}
+          {catInfo && (
+            <span style={{ color: 'var(--muted)', marginLeft: '6px' }}>
+              · {catInfo.label}
+            </span>
+          )}
         </div>
       </div>
 
@@ -401,8 +538,7 @@ function ItemRow({
       {editingAmt ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' }}>
           <input
-            type="number"
-            value={amtInput}
+            type="number" value={amtInput}
             onChange={(e) => setAmtInput(e.target.value)}
             autoFocus
             style={{
@@ -411,20 +547,25 @@ function ItemRow({
               color: 'var(--text)', fontSize: '12px', textAlign: 'right', outline: 'none',
             }}
           />
-          <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '3px', cursor: 'pointer' }}>
-            <input type="checkbox" checked={applyFuture} onChange={(e) => setApplyFuture(e.target.checked)} />
-            Future months too
+          <label style={{
+            fontSize: '10px', color: 'var(--muted)',
+            display: 'flex', alignItems: 'center', gap: '3px', cursor: 'pointer',
+          }}>
+            <input
+              type="checkbox" checked={applyFuture}
+              onChange={(e) => setApplyFuture(e.target.checked)}
+            />
+            Future too
           </label>
           <div style={{ display: 'flex', gap: '4px' }}>
             <button
               onClick={handleSaveAmt}
               style={{
                 padding: '3px 10px', borderRadius: '6px', border: 'none',
-                background: 'var(--primary)', color: '#fff', cursor: 'pointer', fontSize: '11px',
+                background: 'var(--primary)', color: '#fff',
+                cursor: 'pointer', fontSize: '11px',
               }}
-            >
-              OK
-            </button>
+            >OK</button>
             <button
               onClick={() => setEditingAmt(false)}
               style={{
@@ -432,20 +573,16 @@ function ItemRow({
                 border: '1px solid var(--border)', background: 'var(--bg)',
                 color: 'var(--muted)', cursor: 'pointer', fontSize: '11px',
               }}
-            >
-              ✕
-            </button>
+            >✕</button>
           </div>
         </div>
       ) : (
         <div
           onClick={() => { setAmtInput(String(effectiveAmount)); setEditingAmt(true); }}
-          title="Click to edit"
           style={{
             fontWeight: 700, fontSize: '14px',
             color: isPaid ? 'var(--muted)' : 'var(--text)',
             cursor: 'pointer', padding: '2px 6px', borderRadius: '6px',
-            border: '1px dashed transparent',
           }}
         >
           {formatAmt(effectiveAmount, item.currency)}
@@ -456,8 +593,9 @@ function ItemRow({
       <button
         onClick={() => onEdit(item)}
         style={{
-          padding: '5px', borderRadius: '6px', border: '1px solid var(--border)',
-          background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer',
+          padding: '5px', borderRadius: '6px',
+          border: '1px solid var(--border)', background: 'var(--bg)',
+          color: 'var(--muted)', cursor: 'pointer',
         }}
       >
         <Edit2 size={12} />
@@ -465,8 +603,9 @@ function ItemRow({
       <button
         onClick={() => onDelete(item)}
         style={{
-          padding: '5px', borderRadius: '6px', border: '1px solid var(--border)',
-          background: 'var(--bg)', color: 'var(--danger)', cursor: 'pointer',
+          padding: '5px', borderRadius: '6px',
+          border: '1px solid var(--border)', background: 'var(--bg)',
+          color: 'var(--danger)', cursor: 'pointer',
         }}
       >
         <Trash2 size={12} />
@@ -501,21 +640,21 @@ function CountryPanel({
     (i) => i.country === country && isItemActiveInMonth(i, month)
   );
 
+  const savingsItems = activeItems.filter((i) => i.categoryType === 'savings');
+  const expenseItems = activeItems.filter(
+    (i) => !i.categoryType || i.categoryType === 'expense'
+  );
+
   const getAmt = (item: BudgetItem) => {
     const ov = overrides.find((o) => o.budgetItemId === item.id);
     return ov?.amount ?? item.defaultAmount;
   };
 
-  const cashItems = activeItems.filter((i) => i.paymentType === 'cash');
-  const creditItems = activeItems.filter((i) => i.paymentType === 'credit');
-  const tabbyItems = activeItems.filter((i) => i.paymentType === 'tabby');
-
   const totalIncome = income.salary + income.other;
-  const totalCash = cashItems.reduce((s, i) => s + getAmt(i), 0);
-  const totalCredit = creditItems.reduce((s, i) => s + getAmt(i), 0);
-  const totalTabby = tabbyItems.reduce((s, i) => s + getAmt(i), 0);
-  const totalAll = totalCash + totalCredit + totalTabby;
-  const liquidCash = totalIncome - totalCash;
+  const totalSavings = savingsItems.reduce((s, i) => s + getAmt(i), 0);
+  const totalExpenses = expenseItems.reduce((s, i) => s + getAmt(i), 0);
+  const totalAll = totalSavings + totalExpenses;
+  const liquidCash = totalIncome - totalExpenses;
   const netBalance = totalIncome - totalAll;
 
   const paidCount = activeItems.filter((i) =>
@@ -532,15 +671,33 @@ function CountryPanel({
     }
   };
 
-  const renderGroup = (groupItems: BudgetItem[], label: string, color: string) => {
+  const renderGroup = (
+    groupItems: BudgetItem[],
+    label: string,
+    color: string,
+    icon: React.ReactNode,
+    total: number,
+  ) => {
     if (groupItems.length === 0) return null;
     return (
-      <div style={{ marginBottom: '14px' }}>
+      <div style={{ marginBottom: '16px' }}>
+        {/* Group Header */}
         <div style={{
-          fontSize: '11px', fontWeight: 700, color,
-          textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px',
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', marginBottom: '8px',
+          padding: '6px 10px', borderRadius: '8px',
+          background: color + '12',
         }}>
-          {label}
+          <div style={{
+            fontSize: '11px', fontWeight: 700, color,
+            textTransform: 'uppercase', letterSpacing: '0.5px',
+            display: 'flex', alignItems: 'center', gap: '5px',
+          }}>
+            {icon} {label}
+          </div>
+          <div style={{ fontSize: '12px', fontWeight: 700, color }}>
+            {formatAmt(total, currency)}
+          </div>
         </div>
         {groupItems.map((item) => (
           <ItemRow
@@ -562,8 +719,9 @@ function CountryPanel({
       <div className="card" style={{ padding: '20px', flex: 1, minWidth: '300px' }}>
         {/* Header */}
         <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          marginBottom: '16px', paddingBottom: '12px', borderBottom: '2px solid var(--border)',
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', marginBottom: '16px',
+          paddingBottom: '12px', borderBottom: '2px solid var(--border)',
         }}>
           <div>
             <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text)' }}>
@@ -598,15 +756,12 @@ function CountryPanel({
           }}>
             <TrendingUp size={12} /> Income
           </div>
-
           {editingSalary ? (
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
               <input
-                type="number"
-                value={salaryInput}
+                type="number" value={salaryInput}
                 onChange={(e) => setSalaryInput(e.target.value)}
-                placeholder="Salary"
-                autoFocus
+                placeholder="Salary" autoFocus
                 style={{
                   width: '110px', padding: '6px 10px', borderRadius: '8px',
                   border: '1px solid var(--primary)', background: 'var(--bg)',
@@ -615,8 +770,7 @@ function CountryPanel({
               />
               <span style={{ fontSize: '12px', color: 'var(--muted)' }}>+</span>
               <input
-                type="number"
-                value={otherInput}
+                type="number" value={otherInput}
                 onChange={(e) => setOtherInput(e.target.value)}
                 placeholder="Other"
                 style={{
@@ -635,9 +789,7 @@ function CountryPanel({
                   background: 'var(--primary)', color: '#fff',
                   cursor: 'pointer', fontSize: '12px', fontWeight: 600,
                 }}
-              >
-                ✓
-              </button>
+              >✓</button>
               <button
                 onClick={() => setEditingSalary(false)}
                 style={{
@@ -645,9 +797,7 @@ function CountryPanel({
                   border: '1px solid var(--border)', background: 'var(--bg)',
                   color: 'var(--muted)', cursor: 'pointer', fontSize: '12px',
                 }}
-              >
-                ✕
-              </button>
+              >✕</button>
             </div>
           ) : (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -680,7 +830,10 @@ function CountryPanel({
 
         {/* Items */}
         {activeItems.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', fontSize: '13px' }}>
+          <div style={{
+            textAlign: 'center', padding: '24px',
+            color: 'var(--muted)', fontSize: '13px',
+          }}>
             No commitments yet.{' '}
             <button
               onClick={() => { setEditItem(null); setShowModal(true); }}
@@ -694,9 +847,20 @@ function CountryPanel({
           </div>
         ) : (
           <>
-            {renderGroup(cashItems, '💵 Cash Payments', 'var(--success)')}
-            {renderGroup(creditItems, '💳 Credit Card', 'var(--danger)')}
-            {renderGroup(tabbyItems, '🟣 Tabby', '#8b5cf6')}
+            {renderGroup(
+              savingsItems,
+              'Savings & Investments',
+              'var(--success)',
+              <PiggyBank size={11} />,
+              totalSavings,
+            )}
+            {renderGroup(
+              expenseItems,
+              'Expenses',
+              'var(--danger)',
+              <ShoppingBag size={11} />,
+              totalExpenses,
+            )}
           </>
         )}
 
@@ -706,15 +870,23 @@ function CountryPanel({
             marginTop: '8px', padding: '14px', background: 'var(--bg)',
             borderRadius: '12px', border: '1px solid var(--border)',
           }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text)', marginBottom: '10px' }}>
+            <div style={{
+              fontSize: '12px', fontWeight: 700,
+              color: 'var(--text)', marginBottom: '10px',
+            }}>
               📊 Summary
             </div>
 
             {[
               { label: 'Total Income', value: totalIncome, color: 'var(--success)', sign: '+' },
-              { label: `Cash (${cashItems.length} items)`, value: totalCash, color: 'var(--text)', sign: '−' },
-              ...(totalCredit > 0 ? [{ label: 'Credit Card', value: totalCredit, color: 'var(--danger)', sign: '−' }] : []),
-              ...(totalTabby > 0 ? [{ label: 'Tabby', value: totalTabby, color: '#8b5cf6', sign: '−' }] : []),
+              ...(totalSavings > 0 ? [{
+                label: `💰 Savings (${savingsItems.length})`,
+                value: totalSavings, color: 'var(--success)', sign: '−',
+              }] : []),
+              ...(totalExpenses > 0 ? [{
+                label: `🔴 Expenses (${expenseItems.length})`,
+                value: totalExpenses, color: 'var(--danger)', sign: '−',
+              }] : []),
             ].map((row) => (
               <div key={row.label} style={{
                 display: 'flex', justifyContent: 'space-between',
@@ -730,25 +902,40 @@ function CountryPanel({
             <div style={{ height: '1px', background: 'var(--border)', margin: '8px 0' }} />
 
             {/* Liquid Cash */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-              <span style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              fontSize: '12px', marginBottom: '6px',
+            }}>
+              <span style={{
+                color: 'var(--muted)',
+                display: 'flex', alignItems: 'center', gap: '4px',
+              }}>
                 <Banknote size={12} /> Liquid Cash
               </span>
-              <span style={{ fontWeight: 700, color: liquidCash >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              <span style={{
+                fontWeight: 700,
+                color: liquidCash >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}>
                 {formatAmt(liquidCash, currency)}
               </span>
             </div>
 
-            {/* Net */}
+            {/* Net Balance */}
             <div style={{
               display: 'flex', justifyContent: 'space-between',
               padding: '10px 12px', borderRadius: '8px',
-              background: netBalance >= 0 ? '#f0fdf4' : '#fef2f2',
+              background: netBalance >= 0 ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
             }}>
-              <span style={{ fontWeight: 700, fontSize: '13px', color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              <span style={{
+                fontWeight: 700, fontSize: '13px',
+                color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}>
                 Net Balance
               </span>
-              <span style={{ fontWeight: 800, fontSize: '15px', color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              <span style={{
+                fontWeight: 800, fontSize: '15px',
+                color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}>
                 {formatAmt(Math.abs(netBalance), currency)}
                 {netBalance < 0 && ' ⚠️'}
               </span>
@@ -758,7 +945,8 @@ function CountryPanel({
               <div style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 marginTop: '8px', padding: '8px', borderRadius: '8px',
-                background: '#fef2f2', fontSize: '11px', color: 'var(--danger)',
+                background: 'rgba(239,68,68,0.08)',
+                fontSize: '11px', color: 'var(--danger)',
               }}>
                 <AlertTriangle size={12} />
                 Over budget by {formatAmt(Math.abs(netBalance), currency)}
@@ -800,7 +988,7 @@ export default function Budget({ user }: { user: User }) {
         setBudgetItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as BudgetItem[]);
         setLoadedCount((c) => c + 1);
       },
-      (err) => { console.error('budgetItems error:', err); setLoadedCount((c) => c + 1); }
+      (err) => { console.error('budgetItems:', err); setLoadedCount((c) => c + 1); }
     );
 
     const unsubOverrides = onSnapshot(
@@ -809,7 +997,7 @@ export default function Budget({ user }: { user: User }) {
         setOverrides(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as MonthOverride[]);
         setLoadedCount((c) => c + 1);
       },
-      (err) => { console.error('overrides error:', err); setLoadedCount((c) => c + 1); }
+      (err) => { console.error('overrides:', err); setLoadedCount((c) => c + 1); }
     );
 
     const unsubIncome = onSnapshot(
@@ -818,13 +1006,12 @@ export default function Budget({ user }: { user: User }) {
         setIncomes(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as BudgetIncome[]);
         setLoadedCount((c) => c + 1);
       },
-      (err) => { console.error('income error:', err); setLoadedCount((c) => c + 1); }
+      (err) => { console.error('income:', err); setLoadedCount((c) => c + 1); }
     );
 
     return () => { unsubItems(); unsubOverrides(); unsubIncome(); };
   }, [user.uid]);
 
-  // Loading complete when all 3 listeners fired
   useEffect(() => {
     if (loadedCount >= 3) setLoading(false);
   }, [loadedCount]);
@@ -902,29 +1089,51 @@ export default function Budget({ user }: { user: User }) {
     );
   }
 
-  // Summary stats
+  // Combined summary stats
   const uaeIncome = getIncome('UAE');
   const indiaIncome = getIncome('India');
-  const uaeItems = budgetItems.filter((i) => i.country === 'UAE' && isItemActiveInMonth(i, currentMonth));
-  const indiaItems = budgetItems.filter((i) => i.country === 'India' && isItemActiveInMonth(i, currentMonth));
+  const uaeItems = budgetItems.filter(
+    (i) => i.country === 'UAE' && isItemActiveInMonth(i, currentMonth)
+  );
+  const indiaItems = budgetItems.filter(
+    (i) => i.country === 'India' && isItemActiveInMonth(i, currentMonth)
+  );
   const getAmt = (item: BudgetItem) => {
     const ov = monthOverrides.find((o) => o.budgetItemId === item.id);
     return ov?.amount ?? item.defaultAmount;
   };
-  const uaeNet = (uaeIncome.salary + uaeIncome.other) - uaeItems.reduce((s, i) => s + getAmt(i), 0);
-  const indiaNet = (indiaIncome.salary + indiaIncome.other) - indiaItems.reduce((s, i) => s + getAmt(i), 0);
+
+  const uaeSavings = uaeItems
+    .filter((i) => i.categoryType === 'savings')
+    .reduce((s, i) => s + getAmt(i), 0);
+  const uaeExpenses = uaeItems
+    .filter((i) => !i.categoryType || i.categoryType === 'expense')
+    .reduce((s, i) => s + getAmt(i), 0);
+  const indiaSavings = indiaItems
+    .filter((i) => i.categoryType === 'savings')
+    .reduce((s, i) => s + getAmt(i), 0);
+  const indiaExpenses = indiaItems
+    .filter((i) => !i.categoryType || i.categoryType === 'expense')
+    .reduce((s, i) => s + getAmt(i), 0);
+
+  const uaeNet = (uaeIncome.salary + uaeIncome.other) - uaeSavings - uaeExpenses;
+  const indiaNet = (indiaIncome.salary + indiaIncome.other) - indiaSavings - indiaExpenses;
+
   const totalPaid = [...uaeItems, ...indiaItems].filter((i) =>
     monthOverrides.find((o) => o.budgetItemId === i.id)?.isPaid
   ).length;
   const totalItems = uaeItems.length + indiaItems.length;
+
+  const totalSavingsAll = uaeSavings + indiaSavings;
 
   return (
     <div style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto' }}>
 
       {/* Header */}
       <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        marginBottom: '24px', flexWrap: 'wrap', gap: '12px',
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'flex-start', marginBottom: '24px',
+        flexWrap: 'wrap', gap: '12px',
       }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -934,7 +1143,7 @@ export default function Budget({ user }: { user: User }) {
             </h1>
           </div>
           <p style={{ color: 'var(--muted)', fontSize: '14px', marginTop: '4px' }}>
-            Plan your monthly commitments — UAE 🇦🇪 & India 🇮🇳
+            Plan monthly commitments — UAE 🇦🇪 & India 🇮🇳
           </p>
         </div>
 
@@ -970,7 +1179,8 @@ export default function Budget({ user }: { user: User }) {
             <div style={{
               padding: '8px 16px', fontSize: '14px', fontWeight: 700,
               color: 'var(--text)', borderLeft: '1px solid var(--border)',
-              borderRight: '1px solid var(--border)', minWidth: '150px', textAlign: 'center',
+              borderRight: '1px solid var(--border)',
+              minWidth: '150px', textAlign: 'center',
             }}>
               {getMonthLabel(currentMonth)}
             </div>
@@ -991,14 +1201,60 @@ export default function Budget({ user }: { user: User }) {
               onClick={() => setCurrentMonth(getCurrentMonth())}
               style={{
                 padding: '7px 12px', borderRadius: '8px',
-                border: '1px solid var(--primary)', background: 'var(--primary)15',
-                color: 'var(--primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+                border: '1px solid var(--primary)',
+                background: 'rgba(99,102,241,0.08)',
+                color: 'var(--primary)', cursor: 'pointer',
+                fontSize: '12px', fontWeight: 600,
               }}
             >
               Today
             </button>
           )}
         </div>
+      </div>
+
+      {/* Quick Stats */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+        gap: '12px', marginBottom: '20px',
+      }}>
+        {[
+          {
+            label: '💰 Total Savings',
+            value: `AED ${uaeSavings.toLocaleString('en-US', { maximumFractionDigits: 0 })}` +
+              (indiaSavings > 0 ? ` + ₹${indiaSavings.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : ''),
+            color: 'var(--success)',
+          },
+          {
+            label: '🔴 Total Expenses',
+            value: `AED ${uaeExpenses.toLocaleString('en-US', { maximumFractionDigits: 0 })}` +
+              (indiaExpenses > 0 ? ` + ₹${indiaExpenses.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : ''),
+            color: 'var(--danger)',
+          },
+          {
+            label: '✅ Items Paid',
+            value: `${totalPaid} / ${totalItems}`,
+            color: totalPaid === totalItems && totalItems > 0 ? 'var(--success)' : 'var(--warning)',
+          },
+          {
+            label: '📅 Month',
+            value: getMonthLabel(currentMonth),
+            color: 'var(--primary)',
+          },
+        ].map((stat) => (
+          <div key={stat.label} style={{
+            padding: '14px', borderRadius: '12px',
+            background: 'var(--card)', border: '1px solid var(--border)',
+          }}>
+            <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '6px' }}>
+              {stat.label}
+            </div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: stat.color }}>
+              {stat.value}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* UAE + India Panels */}
@@ -1047,25 +1303,34 @@ export default function Budget({ user }: { user: User }) {
               color: indiaNet >= 0 ? 'var(--success)' : 'var(--danger)',
             },
             {
-              label: '✅ Items Paid',
-              value: `${totalPaid} / ${totalItems}`,
-              sub: totalPaid === totalItems && totalItems > 0 ? 'All done!' : 'In progress',
-              color: totalPaid === totalItems && totalItems > 0 ? 'var(--success)' : 'var(--warning)',
+              label: '💰 Total Committed Savings',
+              value: `AED ${uaeSavings.toLocaleString('en-US', { maximumFractionDigits: 0 })}` +
+                (indiaSavings > 0
+                  ? ` + ₹${indiaSavings.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                  : ''),
+              sub: 'This month',
+              color: 'var(--success)',
             },
             {
-              label: '📅 Current Month',
-              value: getMonthLabel(currentMonth),
-              sub: currentMonth === getCurrentMonth() ? 'This month' : 'Viewing past/future',
-              color: 'var(--primary)',
+              label: '✅ Payment Progress',
+              value: `${totalPaid} / ${totalItems}`,
+              sub: totalPaid === totalItems && totalItems > 0 ? '🎉 All done!' : 'In progress',
+              color: totalPaid === totalItems && totalItems > 0 ? 'var(--success)' : 'var(--warning)',
             },
           ].map((stat) => (
             <div key={stat.label} style={{
               padding: '14px', borderRadius: '10px',
               background: 'var(--bg)', border: '1px solid var(--border)',
             }}>
-              <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '6px' }}>{stat.label}</div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: stat.color }}>{stat.value}</div>
-              <div style={{ fontSize: '11px', color: stat.color, marginTop: '2px', opacity: 0.8 }}>{stat.sub}</div>
+              <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '6px' }}>
+                {stat.label}
+              </div>
+              <div style={{ fontSize: '14px', fontWeight: 800, color: stat.color }}>
+                {stat.value}
+              </div>
+              <div style={{ fontSize: '11px', color: stat.color, marginTop: '2px', opacity: 0.8 }}>
+                {stat.sub}
+              </div>
             </div>
           ))}
         </div>
