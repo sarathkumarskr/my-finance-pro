@@ -174,29 +174,48 @@ function ItemModal({
 
   const handleSave = async () => {
     if (!name.trim()) { toast.error('Name required'); return; }
-    if (!amount || isNaN(Number(amount))) { toast.error('Valid amount required'); return; }
+    if (!amount || isNaN(Number(amount))) { 
+      toast.error('Valid amount required'); return; 
+    }
     setSaving(true);
     try {
-      const data: Omit<BudgetItem, 'id' | 'createdAt'> = {
-        userId, country, name: name.trim(), paymentType,
-        defaultAmount: Number(amount), currency,
-        startMonth, endMonth: endMonth || null,
-        isActive: true, categoryType,
-        savingsCategory: categoryType === 'savings' ? savingsCategory : undefined,
-        expenseCategory: categoryType === 'expense' ? expenseCategory : undefined,
+      // undefined ഒന്നും ഇല്ല — എല്ലാം null അല്ലെങ്കിൽ value
+      const data: Record<string, any> = {
+        userId,
+        country,
+        name: name.trim(),
+        paymentType,
+        defaultAmount: Number(amount),
+        currency,
+        startMonth,
+        endMonth: endMonth || null,
+        isActive: true,
+        categoryType,
+        // Savings category — always set, null if not savings
+        savingsCategory: categoryType === 'savings' 
+          ? savingsCategory 
+          : null,
+        // Expense category — always set, null if not expense  
+        expenseCategory: categoryType === 'expense' 
+          ? expenseCategory 
+          : null,
       };
+  
+      console.log('[Budget] Saving:', data);
+  
       if (editItem?.id) {
         await updateDoc(doc(db, 'budgetItems', editItem.id), data);
         toast.success('Updated!');
       } else {
         await addDoc(collection(db, 'budgetItems'), {
-          ...data, createdAt: serverTimestamp(),
+          ...data,
+          createdAt: serverTimestamp(),
         });
         toast.success('Added!');
       }
       onClose();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('[Budget] Error:', e?.code, e?.message);
       toast.error('Failed to save');
     } finally {
       setSaving(false);
