@@ -34,6 +34,10 @@ import {
   Smartphone,
   AlertTriangle,
   RefreshCw,
+  Wallet,
+  IndianRupee,
+  DollarSign,
+  Calendar,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -57,6 +61,26 @@ type UserPrefs = {
   updatedAt?: any;
 };
 
+type PaymentMethod = {
+  id: string;
+  userId: string;
+  type: 'credit' | 'debit' | 'tabby' | 'cash' | 'upi' | 'custom';
+  name: string;
+  bankName?: string;
+  country: 'UAE' | 'India' | 'Both';
+  color?: string;
+};
+
+type OpeningBalance = {
+  id?: string;
+  userId: string;
+  uaeCash: number;
+  indiaCash: number;
+  perMethod: Record<string, number>;
+  asOf: string;
+  updatedAt?: any;
+};
+
 const RESET_COLLECTIONS = [
   'transactions',
   'paymentMethods',
@@ -70,15 +94,17 @@ const RESET_COLLECTIONS = [
   'budgetItems',
   'budgetMonthOverrides',
   'budgetIncome',
+  'openingBalances',
 ] as const;
 
+// ✅ NO JSX in module-level array — only plain data
 const EXPORT_TARGETS = [
   {
     key: 'transactions',
     label: 'Transactions',
     collection: 'transactions',
     description: 'Income and expense records',
-    icon: <FileText size={18} />,
+    iconType: 'file',
     color: 'var(--primary)',
   },
   {
@@ -86,7 +112,7 @@ const EXPORT_TARGETS = [
     label: 'Payment Methods',
     collection: 'paymentMethods',
     description: 'Cards, cash, UPI, Tabby etc.',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: '#06b6d4',
   },
   {
@@ -94,7 +120,7 @@ const EXPORT_TARGETS = [
     label: 'Debts',
     collection: 'debts',
     description: 'Debt records',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: 'var(--warning)',
   },
   {
@@ -102,7 +128,7 @@ const EXPORT_TARGETS = [
     label: 'Debt Payments',
     collection: 'debtPayments',
     description: 'Debt payment history',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: '#f97316',
   },
   {
@@ -110,7 +136,7 @@ const EXPORT_TARGETS = [
     label: 'Saving Goals',
     collection: 'savingGoals',
     description: 'Savings goals and progress',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: 'var(--success)',
   },
   {
@@ -118,7 +144,7 @@ const EXPORT_TARGETS = [
     label: 'Remittances',
     collection: 'remittances',
     description: 'AED to INR transfer history',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: '#8b5cf6',
   },
   {
@@ -126,7 +152,7 @@ const EXPORT_TARGETS = [
     label: 'Budget Items',
     collection: 'budgetItems',
     description: 'Recurring forecast items',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: '#14b8a6',
   },
   {
@@ -134,7 +160,7 @@ const EXPORT_TARGETS = [
     label: 'Budget Overrides',
     collection: 'budgetMonthOverrides',
     description: 'Monthly modified amounts and paid status',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: '#ec4899',
   },
   {
@@ -142,12 +168,19 @@ const EXPORT_TARGETS = [
     label: 'Budget Income',
     collection: 'budgetIncome',
     description: 'Monthly salary and other income plan',
-    icon: <Database size={18} />,
+    iconType: 'db',
     color: '#22c55e',
   },
 ] as const;
 
-type ExportType = (typeof EXPORT_TARGETS)[number]['key'] | 'all';
+type ExportKey = (typeof EXPORT_TARGETS)[number]['key'];
+type ExportType = ExportKey | 'all';
+
+// ✅ Icon rendered inside component tree only
+function ExportIcon({ iconType, size = 18 }: { iconType: string; size?: number }) {
+  if (iconType === 'file') return <FileText size={size} />;
+  return <Database size={size} />;
+}
 
 const defaultPrefs = (user: User): UserPrefs => ({
   userId: user.uid,
@@ -163,6 +196,14 @@ const defaultPrefs = (user: User): UserPrefs => ({
   remittanceReminderDay: 1,
 });
 
+const defaultOpeningBalance = (user: User): OpeningBalance => ({
+  userId: user.uid,
+  uaeCash: 0,
+  indiaCash: 0,
+  perMethod: {},
+  asOf: new Date().toISOString().slice(0, 10),
+});
+
 const prefsToFirestore = (prefs: UserPrefs) => {
   const { id, ...rest } = prefs;
   return rest;
@@ -171,7 +212,6 @@ const prefsToFirestore = (prefs: UserPrefs) => {
 const cleanForExport = (docs: any[]) =>
   docs.map((d) => {
     const clean: Record<string, any> = {};
-
     Object.entries(d).forEach(([key, value]) => {
       if (key === 'createdAt' || key === 'updatedAt') {
         clean[key] = (value as any)?.toDate
@@ -185,7 +225,6 @@ const cleanForExport = (docs: any[]) =>
         clean[key] = value;
       }
     });
-
     return clean;
   });
 
@@ -194,37 +233,31 @@ const toCSV = (data: Record<string, any>[], filename: string) => {
     toast.error('No data to export');
     return false;
   }
-
   const headers = Object.keys(data[0]);
-
   const rows = data.map((row) =>
     headers
       .map((header) => {
         const value = row[header];
-
         if (value === null || value === undefined) return '';
-
         const str = String(value).replace(/"/g, '""');
-
         return str.includes(',') || str.includes('\n') || str.includes('"')
           ? `"${str}"`
           : str;
       })
       .join(',')
   );
-
   const csv = [headers.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-
   const link = document.createElement('a');
   link.href = url;
   link.download = `${filename}_${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
-
   URL.revokeObjectURL(url);
   return true;
 };
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function SectionHeader({
   icon,
@@ -243,7 +276,6 @@ function SectionHeader({
           {title}
         </span>
       </div>
-
       {description && (
         <p
           style={{
@@ -325,7 +357,6 @@ function SettingRow({
         <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>
           {label}
         </div>
-
         {description && (
           <div
             style={{
@@ -339,37 +370,141 @@ function SettingRow({
           </div>
         )}
       </div>
-
       <div style={{ flexShrink: 0 }}>{children}</div>
     </div>
   );
 }
 
+function BalanceInputRow({
+  icon,
+  label,
+  sublabel,
+  value,
+  onChange,
+  currency,
+  color,
+}: {
+  icon: ReactNode;
+  label: string;
+  sublabel?: string;
+  value: number;
+  onChange: (v: number) => void;
+  currency: string;
+  color: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [inputVal, setInputVal] = useState(value === 0 ? '' : String(value));
+
+  useEffect(() => {
+    if (!focused) {
+      setInputVal(value === 0 ? '' : String(value));
+    }
+  }, [value, focused]);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '12px 14px',
+        background: 'var(--bg)',
+        borderRadius: '12px',
+        border: `1px solid ${focused ? color : 'var(--border)'}`,
+        transition: 'border-color 0.2s',
+        marginBottom: '8px',
+      }}
+    >
+      <div
+        style={{
+          width: '38px',
+          height: '38px',
+          borderRadius: '10px',
+          background: color + '18',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)' }}>
+          {label}
+        </div>
+        {sublabel && (
+          <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '1px' }}>
+            {sublabel}
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+        <span style={{ fontSize: '13px', fontWeight: 800, color }}>{currency}</span>
+        <input
+          type="number"
+          min="0"
+          placeholder="0"
+          value={inputVal}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            const parsed = parseFloat(inputVal) || 0;
+            setInputVal(parsed === 0 ? '' : String(parsed));
+            onChange(parsed);
+          }}
+          onChange={(e) => setInputVal(e.target.value)}
+          style={{
+            width: '110px',
+            padding: '8px 10px',
+            borderRadius: '8px',
+            border: '1px solid var(--border)',
+            background: 'var(--card)',
+            color: 'var(--text)',
+            fontSize: '14px',
+            fontWeight: 700,
+            textAlign: 'right',
+            outline: 'none',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function SettingsPage({ user }: { user: User }) {
   const [prefs, setPrefs] = useState<UserPrefs>(defaultPrefs(user));
   const [prefsDocId, setPrefsDocId] = useState<string | null>(null);
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(user.displayName || '');
-
   const [exporting, setExporting] = useState<ExportType | null>(null);
   const [resettingData, setResettingData] = useState(false);
 
+  const [openingBal, setOpeningBal] = useState<OpeningBalance>(
+    defaultOpeningBalance(user)
+  );
+  const [openingBalDocId, setOpeningBalDocId] = useState<string | null>(null);
+  const [savingBal, setSavingBal] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+
+  // ── Load userPrefs ──
   useEffect(() => {
     if (!user?.uid) return;
-
-    const q = query(collection(db, 'userPrefs'), where('userId', '==', user.uid));
-
+    const q = query(
+      collection(db, 'userPrefs'),
+      where('userId', '==', user.uid)
+    );
     const unsub = onSnapshot(
       q,
       (snap) => {
         if (!snap.empty) {
           const first = snap.docs[0];
           const data = first.data() as UserPrefs;
-
           setPrefsDocId(first.id);
           setPrefs({ id: first.id, ...data });
           setNameInput(data.displayName || user.displayName || '');
@@ -378,7 +513,6 @@ export default function SettingsPage({ user }: { user: User }) {
           setPrefs(defaultPrefs(user));
           setNameInput(user.displayName || '');
         }
-
         setLoading(false);
       },
       (err) => {
@@ -387,36 +521,110 @@ export default function SettingsPage({ user }: { user: User }) {
         setLoading(false);
       }
     );
-
     return () => unsub();
   }, [user.uid]);
 
+  // ── Load Opening Balances ──
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'openingBalances'),
+      where('userId', '==', user.uid)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        const first = snap.docs[0];
+        const data = first.data() as OpeningBalance;
+        setOpeningBalDocId(first.id);
+        setOpeningBal({
+          id: first.id,
+          userId: data.userId,
+          uaeCash: data.uaeCash ?? 0,
+          indiaCash: data.indiaCash ?? 0,
+          // ✅ FIX: ensure perMethod is always a plain object, never undefined
+          perMethod: data.perMethod && typeof data.perMethod === 'object'
+            ? { ...data.perMethod }
+            : {},
+          asOf: data.asOf ?? new Date().toISOString().slice(0, 10),
+        });
+      } else {
+        setOpeningBalDocId(null);
+        setOpeningBal(defaultOpeningBalance(user));
+      }
+    });
+    return () => unsub();
+  }, [user.uid]);
+
+  // ── Load Payment Methods ──
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'paymentMethods'),
+      where('userId', '==', user.uid)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      // ✅ FIX: only include docs that have a valid id
+      const methods = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as PaymentMethod))
+        .filter((pm) => pm.id && typeof pm.id === 'string');
+      setPaymentMethods(methods);
+    });
+    return () => unsub();
+  }, [user.uid]);
+
+  // ── Save userPrefs ──
   const savePrefs = async (updated: UserPrefs, showToast = true) => {
     setSaving(true);
-
     try {
       const data = {
         ...prefsToFirestore(updated),
         updatedAt: serverTimestamp(),
       };
-
       if (prefsDocId) {
         await updateDoc(doc(db, 'userPrefs', prefsDocId), data);
       } else {
         const newDoc = doc(collection(db, 'userPrefs'));
-        await setDoc(newDoc, {
-          ...data,
-          createdAt: serverTimestamp(),
-        });
+        await setDoc(newDoc, { ...data, createdAt: serverTimestamp() });
         setPrefsDocId(newDoc.id);
       }
-
       if (showToast) toast.success('Settings saved!');
     } catch (err) {
       console.error(err);
       toast.error('Failed to save settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Save Opening Balances ──
+  const saveOpeningBalance = async (bal: OpeningBalance) => {
+    setSavingBal(true);
+    try {
+      const { id, ...rest } = bal;
+      const payload = {
+        userId: rest.userId,
+        uaeCash: rest.uaeCash ?? 0,
+        indiaCash: rest.indiaCash ?? 0,
+        // ✅ FIX: ensure perMethod never has undefined values
+        perMethod: Object.fromEntries(
+          Object.entries(rest.perMethod ?? {}).map(([k, v]) => [k, v ?? 0])
+        ),
+        asOf: rest.asOf,
+        updatedAt: serverTimestamp(),
+      };
+      if (openingBalDocId) {
+        await updateDoc(doc(db, 'openingBalances', openingBalDocId), payload);
+      } else {
+        const newDoc = doc(collection(db, 'openingBalances'));
+        await setDoc(newDoc, { ...payload, createdAt: serverTimestamp() });
+        setOpeningBalDocId(newDoc.id);
+      }
+      toast.success('Opening balances saved!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save opening balances');
+    } finally {
+      setSavingBal(false);
     }
   };
 
@@ -432,39 +640,34 @@ export default function SettingsPage({ user }: { user: User }) {
   ) => {
     const updated = {
       ...prefs,
-      notifications: {
-        ...prefs.notifications,
-        [key]: value,
-      },
+      notifications: { ...prefs.notifications, [key]: value },
     };
-
     setPrefs(updated);
     savePrefs(updated);
   };
 
+  const updateMethodBalance = (methodId: string, amount: number) => {
+    if (!methodId) return; // ✅ FIX: guard against undefined id
+    setOpeningBal((prev) => ({
+      ...prev,
+      perMethod: {
+        ...(prev.perMethod ?? {}),
+        [methodId]: amount,
+      },
+    }));
+  };
+
   const handleSaveName = async () => {
     const cleanName = nameInput.trim();
-
-    if (!cleanName) {
-      toast.error('Name cannot be empty');
-      return;
-    }
-
+    if (!cleanName) { toast.error('Name cannot be empty'); return; }
     setSaving(true);
-
     try {
       if (auth.currentUser) {
         await updateProfile(auth.currentUser, { displayName: cleanName });
       }
-
-      const updated = {
-        ...prefs,
-        displayName: cleanName,
-      };
-
+      const updated = { ...prefs, displayName: cleanName };
       setPrefs(updated);
       await savePrefs(updated, false);
-
       setEditingName(false);
       toast.success('Profile updated!');
     } catch (err) {
@@ -477,60 +680,41 @@ export default function SettingsPage({ user }: { user: User }) {
 
   const handleExport = async (type: ExportType) => {
     setExporting(type);
-
     try {
       if (type === 'all') {
         let exportedCount = 0;
-
         for (const target of EXPORT_TARGETS) {
           const snap = await getDocs(
-            query(collection(db, target.collection), where('userId', '==', user.uid))
+            query(
+              collection(db, target.collection),
+              where('userId', '==', user.uid)
+            )
           );
-
           const data = cleanForExport(
-            snap.docs.map((d) => ({
-              id: d.id,
-              ...d.data(),
-            }))
+            snap.docs.map((d) => ({ id: d.id, ...d.data() }))
           );
-
           if (data.length > 0) {
             const ok = toCSV(data, `myfinancepro_${target.key}`);
             if (ok) exportedCount++;
-
-            await new Promise((resolve) => setTimeout(resolve, 250));
+            await new Promise((r) => setTimeout(r, 250));
           }
         }
-
-        if (exportedCount === 0) {
-          toast.error('No data found to export');
-        } else {
-          toast.success(`Exported ${exportedCount} CSV file${exportedCount === 1 ? '' : 's'}`);
-        }
-
+        if (exportedCount === 0) toast.error('No data found to export');
+        else
+          toast.success(
+            `Exported ${exportedCount} CSV file${exportedCount === 1 ? '' : 's'}`
+          );
         return;
       }
-
       const target = EXPORT_TARGETS.find((t) => t.key === type);
-
-      if (!target) {
-        toast.error('Invalid export type');
-        return;
-      }
-
+      if (!target) { toast.error('Invalid export type'); return; }
       const snap = await getDocs(
         query(collection(db, target.collection), where('userId', '==', user.uid))
       );
-
       const data = cleanForExport(
-        snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        }))
+        snap.docs.map((d) => ({ id: d.id, ...d.data() }))
       );
-
       const ok = toCSV(data, `myfinancepro_${target.key}`);
-
       if (ok) toast.success(`${target.label} exported!`);
     } catch (err) {
       console.error(err);
@@ -542,56 +726,37 @@ export default function SettingsPage({ user }: { user: User }) {
 
   const handleResetAllMyData = async () => {
     const confirmText = window.prompt(
-      'This will permanently delete ALL data for the currently logged-in account only.\n\nThis includes transactions, cards, debts, savings, remittances, budgets, forecast data and settings.\n\nType RESET to continue.'
+      'This will permanently delete ALL data for the currently logged-in account only.\n\nType RESET to continue.'
     );
-
-    if (confirmText !== 'RESET') {
+    if (confirmText !== 'RESET') { toast.error('Reset cancelled'); return; }
+    if (!window.confirm('Final confirmation: This cannot be undone. Continue?')) {
       toast.error('Reset cancelled');
       return;
     }
-
-    const secondConfirm = window.confirm(
-      'Final confirmation: This cannot be undone. Continue?'
-    );
-
-    if (!secondConfirm) {
-      toast.error('Reset cancelled');
-      return;
-    }
-
     setResettingData(true);
-
     try {
       let deletedCount = 0;
-
       for (const colName of RESET_COLLECTIONS) {
         const snap = await getDocs(
           query(collection(db, colName), where('userId', '==', user.uid))
         );
-
         const docs = snap.docs;
-
         for (let i = 0; i < docs.length; i += 400) {
           const batch = writeBatch(db);
-          const chunk = docs.slice(i, i + 400);
-
-          chunk.forEach((d) => {
-            batch.delete(doc(db, colName, d.id));
-          });
-
+          docs
+            .slice(i, i + 400)
+            .forEach((d) => batch.delete(doc(db, colName, d.id)));
           await batch.commit();
-          deletedCount += chunk.length;
+          deletedCount += Math.min(400, docs.length - i);
         }
       }
-
       setPrefsDocId(null);
       setPrefs(defaultPrefs(user));
       setNameInput(user.displayName || '');
-
+      setOpeningBalDocId(null);
+      setOpeningBal(defaultOpeningBalance(user));
       toast.success(
-        `Reset complete. Deleted ${deletedCount} document${
-          deletedCount === 1 ? '' : 's'
-        }.`
+        `Reset complete. Deleted ${deletedCount} document${deletedCount === 1 ? '' : 's'}.`
       );
     } catch (err) {
       console.error(err);
@@ -603,15 +768,46 @@ export default function SettingsPage({ user }: { user: User }) {
 
   const handleResetSettingsOnly = async () => {
     if (!window.confirm('Reset settings to default values?')) return;
-
     const reset = defaultPrefs(user);
-
     setPrefs(reset);
     setNameInput(user.displayName || '');
-
     await savePrefs(reset);
     toast.success('Settings reset to defaults');
   };
+
+  // ✅ FIX: Safe filtered lists — only methods with valid string id
+  const uaeMethods = paymentMethods.filter(
+    (pm) => pm.id && (pm.country === 'UAE' || pm.country === 'Both')
+  );
+  const indiaMethods = paymentMethods.filter(
+    (pm) => pm.id && (pm.country === 'India' || pm.country === 'Both')
+  );
+
+  const cardTypeIcon: Record<string, string> = {
+    credit: '💳',
+    debit: '🏦',
+    tabby: '🛍️',
+    cash: '💵',
+    upi: '📱',
+    custom: '➕',
+  };
+
+  // ✅ FIX: Safe reduce with explicit guards
+  const safePerMethod = openingBal.perMethod ?? {};
+
+  const totalUAE =
+    (openingBal.uaeCash ?? 0) +
+    uaeMethods.reduce((sum, pm) => {
+      if (!pm.id) return sum;
+      return sum + (safePerMethod[pm.id] ?? 0);
+    }, 0);
+
+  const totalIndia =
+    (openingBal.indiaCash ?? 0) +
+    indiaMethods.reduce((sum, pm) => {
+      if (!pm.id) return sum;
+      return sum + (safePerMethod[pm.id] ?? 0);
+    }, 0);
 
   if (loading) {
     return (
@@ -650,20 +846,18 @@ export default function SettingsPage({ user }: { user: User }) {
             Settings
           </h1>
         </div>
-
         <p style={{ color: 'var(--muted)', fontSize: '14px', marginTop: '6px' }}>
-          Manage your profile, preferences, exports and account data.
+          Manage your profile, opening balances, preferences, exports and account data.
         </p>
       </div>
 
-      {/* Profile */}
+      {/* ── Profile ── */}
       <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
         <SectionHeader
           icon={<UserIcon size={16} />}
           title="Profile"
           description="Your Google account and app profile information"
         />
-
         <div
           style={{
             display: 'flex',
@@ -710,7 +904,6 @@ export default function SettingsPage({ user }: { user: User }) {
               </div>
             )}
           </div>
-
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
@@ -724,7 +917,6 @@ export default function SettingsPage({ user }: { user: User }) {
             >
               {prefs.displayName || user.displayName || 'User'}
             </div>
-
             <div
               style={{
                 fontSize: '13px',
@@ -737,7 +929,6 @@ export default function SettingsPage({ user }: { user: User }) {
             >
               {user.email}
             </div>
-
             <div
               style={{
                 display: 'inline-flex',
@@ -783,7 +974,6 @@ export default function SettingsPage({ user }: { user: User }) {
                 }}
                 autoFocus
               />
-
               <button
                 onClick={handleSaveName}
                 disabled={saving}
@@ -803,7 +993,6 @@ export default function SettingsPage({ user }: { user: User }) {
               >
                 <Save size={13} /> Save
               </button>
-
               <button
                 onClick={() => {
                   setEditingName(false);
@@ -865,7 +1054,316 @@ export default function SettingsPage({ user }: { user: User }) {
         </SettingRow>
       </div>
 
-      {/* Preferences */}
+      {/* ── Opening Balances ── */}
+      <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
+        <SectionHeader
+          icon={<Wallet size={16} />}
+          title="Opening Balances"
+          description="Set your starting balances. Dashboard calculates: Opening Balance + Income − Expenses from this date."
+        />
+
+        {/* As-of date */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '12px 14px',
+            background: 'var(--bg)',
+            borderRadius: '10px',
+            border: '1px solid var(--border)',
+            marginBottom: '20px',
+          }}
+        >
+          <Calendar size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+              Balances As Of
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '1px' }}>
+              Date from which transactions are counted
+            </div>
+          </div>
+          <input
+            type="date"
+            value={openingBal.asOf}
+            onChange={(e) =>
+              setOpeningBal((prev) => ({ ...prev, asOf: e.target.value }))
+            }
+            style={{
+              padding: '7px 10px',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              background: 'var(--card)',
+              color: 'var(--text)',
+              fontSize: '13px',
+              fontWeight: 700,
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          />
+        </div>
+
+        {/* UAE Section */}
+        <div style={{ marginBottom: '20px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '12px',
+              paddingBottom: '8px',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <span style={{ fontSize: '18px' }}>🇦🇪</span>
+            <span style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>
+              UAE Balances
+            </span>
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: '12px',
+                color: 'var(--muted)',
+                fontWeight: 600,
+              }}
+            >
+              in AED
+            </span>
+          </div>
+
+          <BalanceInputRow
+            icon={<DollarSign size={16} />}
+            label="Cash (AED)"
+            sublabel="Physical cash in UAE"
+            value={openingBal.uaeCash ?? 0}
+            onChange={(v) => setOpeningBal((prev) => ({ ...prev, uaeCash: v }))}
+            currency="AED"
+            color="var(--success)"
+          />
+
+          {uaeMethods.length === 0 ? (
+            <div
+              style={{
+                padding: '12px',
+                textAlign: 'center',
+                fontSize: '13px',
+                color: 'var(--muted)',
+                background: 'var(--bg)',
+                borderRadius: '10px',
+                border: '1px dashed var(--border)',
+              }}
+            >
+              No UAE payment methods — add them in Cards page
+            </div>
+          ) : (
+            uaeMethods.map((pm) => (
+              <BalanceInputRow
+                key={pm.id}
+                icon={
+                  <span style={{ fontSize: '16px' }}>
+                    {cardTypeIcon[pm.type] || '💳'}
+                  </span>
+                }
+                label={pm.name}
+                sublabel={pm.bankName || pm.type}
+                value={safePerMethod[pm.id] ?? 0}
+                onChange={(v) => updateMethodBalance(pm.id, v)}
+                currency="AED"
+                color={pm.color || 'var(--primary)'}
+              />
+            ))
+          )}
+        </div>
+
+        {/* India Section */}
+        <div style={{ marginBottom: '20px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '12px',
+              paddingBottom: '8px',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <span style={{ fontSize: '18px' }}>🇮🇳</span>
+            <span style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>
+              India Balances
+            </span>
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: '12px',
+                color: 'var(--muted)',
+                fontWeight: 600,
+              }}
+            >
+              in INR
+            </span>
+          </div>
+
+          <BalanceInputRow
+            icon={<IndianRupee size={16} />}
+            label="Cash (INR)"
+            sublabel="Physical cash in India"
+            value={openingBal.indiaCash ?? 0}
+            onChange={(v) => setOpeningBal((prev) => ({ ...prev, indiaCash: v }))}
+            currency="₹"
+            color="var(--warning)"
+          />
+
+          {indiaMethods.length === 0 ? (
+            <div
+              style={{
+                padding: '12px',
+                textAlign: 'center',
+                fontSize: '13px',
+                color: 'var(--muted)',
+                background: 'var(--bg)',
+                borderRadius: '10px',
+                border: '1px dashed var(--border)',
+              }}
+            >
+              No India payment methods — add them in Cards page
+            </div>
+          ) : (
+            indiaMethods.map((pm) => (
+              <BalanceInputRow
+                key={pm.id}
+                icon={
+                  <span style={{ fontSize: '16px' }}>
+                    {cardTypeIcon[pm.type] || '💳'}
+                  </span>
+                }
+                label={pm.name}
+                sublabel={pm.bankName || pm.type}
+                value={safePerMethod[pm.id] ?? 0}
+                onChange={(v) => updateMethodBalance(pm.id, v)}
+                currency="₹"
+                color={pm.color || 'var(--warning)'}
+              />
+            ))
+          )}
+        </div>
+
+        {/* Summary */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '10px',
+            marginBottom: '16px',
+          }}
+        >
+          <div
+            style={{
+              padding: '12px 14px',
+              background: 'rgba(16,185,129,0.08)',
+              borderRadius: '10px',
+              border: '1px solid rgba(16,185,129,0.2)',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
+              Total UAE
+            </div>
+            <div
+              style={{
+                fontSize: '18px',
+                fontWeight: 900,
+                color: 'var(--success)',
+                marginTop: '4px',
+              }}
+            >
+              AED {totalUAE.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+            </div>
+          </div>
+          <div
+            style={{
+              padding: '12px 14px',
+              background: 'rgba(245,158,11,0.08)',
+              borderRadius: '10px',
+              border: '1px solid rgba(245,158,11,0.2)',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
+              Total India
+            </div>
+            <div
+              style={{
+                fontSize: '18px',
+                fontWeight: 900,
+                color: 'var(--warning)',
+                marginTop: '4px',
+              }}
+            >
+              ₹ {totalIndia.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </div>
+          </div>
+        </div>
+
+        {/* Info */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'flex-start',
+            padding: '10px 12px',
+            background: 'var(--bg)',
+            borderRadius: '8px',
+            border: '1px solid var(--border)',
+            marginBottom: '16px',
+          }}
+        >
+          <Info
+            size={14}
+            style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '2px' }}
+          />
+          <span style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--text)' }}>How it works:</strong> Enter
+            your actual balances for each account. Dashboard calculates current
+            balance as: <em>Opening Balance + All Income − All Expenses</em> from
+            the "As Of" date onwards.
+          </span>
+        </div>
+
+        <button
+          onClick={() => saveOpeningBalance(openingBal)}
+          disabled={savingBal}
+          style={{
+            width: '100%',
+            padding: '13px',
+            borderRadius: '10px',
+            background: savingBal ? 'var(--muted)' : 'var(--primary)',
+            color: '#fff',
+            border: 'none',
+            cursor: savingBal ? 'not-allowed' : 'pointer',
+            fontSize: '14px',
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+          }}
+        >
+          {savingBal ? (
+            <>
+              <RefreshCw size={15} style={{ animation: 'spin 0.8s linear infinite' }} />
+              Saving Balances…
+            </>
+          ) : (
+            <>
+              <Save size={15} />
+              Save Opening Balances
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* ── Preferences ── */}
       <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
         <SectionHeader
           icon={<Globe size={16} />}
@@ -893,7 +1391,8 @@ export default function SettingsPage({ user }: { user: User }) {
                 style={{
                   padding: '7px 16px',
                   border: 'none',
-                  background: prefs.defaultCurrency === c ? 'var(--primary)' : 'transparent',
+                  background:
+                    prefs.defaultCurrency === c ? 'var(--primary)' : 'transparent',
                   color: prefs.defaultCurrency === c ? '#fff' : 'var(--muted)',
                   cursor: 'pointer',
                   fontSize: '13px',
@@ -926,7 +1425,8 @@ export default function SettingsPage({ user }: { user: User }) {
                 style={{
                   padding: '7px 13px',
                   border: 'none',
-                  background: prefs.defaultCountry === c ? 'var(--primary)' : 'transparent',
+                  background:
+                    prefs.defaultCountry === c ? 'var(--primary)' : 'transparent',
                   color: prefs.defaultCountry === c ? '#fff' : 'var(--muted)',
                   cursor: 'pointer',
                   fontSize: '13px',
@@ -969,7 +1469,10 @@ export default function SettingsPage({ user }: { user: User }) {
           </div>
         </SettingRow>
 
-        <SettingRow label="Theme" description="Appearance preference saved for future use">
+        <SettingRow
+          label="Theme"
+          description="Appearance preference saved for future use"
+        >
           <div
             style={{
               display: 'flex',
@@ -986,11 +1489,14 @@ export default function SettingsPage({ user }: { user: User }) {
             ].map((item) => (
               <button
                 key={item.value}
-                onClick={() => updatePref('theme', item.value as UserPrefs['theme'])}
+                onClick={() =>
+                  updatePref('theme', item.value as UserPrefs['theme'])
+                }
                 style={{
                   padding: '7px 11px',
                   border: 'none',
-                  background: prefs.theme === item.value ? 'var(--primary)' : 'transparent',
+                  background:
+                    prefs.theme === item.value ? 'var(--primary)' : 'transparent',
                   color: prefs.theme === item.value ? '#fff' : 'var(--muted)',
                   cursor: 'pointer',
                   fontSize: '12px',
@@ -1008,14 +1514,13 @@ export default function SettingsPage({ user }: { user: User }) {
         </SettingRow>
       </div>
 
-      {/* Notifications */}
+      {/* ── Notifications ── */}
       <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
         <SectionHeader
           icon={<Bell size={16} />}
           title="Notifications"
           description="Saved notification preferences for future alerts"
         />
-
         <SettingRow
           label="Budget Alerts"
           description="Notify when spending exceeds budget"
@@ -1025,14 +1530,12 @@ export default function SettingsPage({ user }: { user: User }) {
             onChange={(v) => updateNotification('budgetAlerts', v)}
           />
         </SettingRow>
-
         <SettingRow label="Weekly Summary" description="Weekly finance summary">
           <Toggle
             value={prefs.notifications.weeklyReport}
             onChange={(v) => updateNotification('weeklyReport', v)}
           />
         </SettingRow>
-
         <SettingRow
           label="Reminder Emails"
           description="Monthly reminder preferences"
@@ -1042,7 +1545,6 @@ export default function SettingsPage({ user }: { user: User }) {
             onChange={(v) => updateNotification('reminderEmails', v)}
           />
         </SettingRow>
-
         <div
           style={{
             display: 'flex',
@@ -1060,20 +1562,19 @@ export default function SettingsPage({ user }: { user: User }) {
             style={{ color: 'var(--muted)', flexShrink: 0, marginTop: '2px' }}
           />
           <span style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: 1.5 }}>
-            Push/email notifications are preference settings for future notification
-            integration.
+            Push/email notifications are preference settings for future
+            notification integration.
           </span>
         </div>
       </div>
 
-      {/* Export Data */}
+      {/* ── Export Data ── */}
       <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
         <SectionHeader
           icon={<Download size={16} />}
           title="Export Data"
           description="Download your data as CSV files before backup/reset"
         />
-
         <div
           style={{
             display: 'grid',
@@ -1094,10 +1595,12 @@ export default function SettingsPage({ user }: { user: User }) {
                 padding: '14px',
                 borderRadius: '12px',
                 border: '1px solid var(--border)',
-                background: exporting === item.key ? item.color + '15' : 'var(--bg)',
+                background:
+                  exporting === item.key ? item.color + '15' : 'var(--bg)',
                 cursor: exporting !== null ? 'not-allowed' : 'pointer',
                 textAlign: 'left',
-                opacity: exporting !== null && exporting !== item.key ? 0.6 : 1,
+                opacity:
+                  exporting !== null && exporting !== item.key ? 0.6 : 1,
               }}
             >
               <div
@@ -1119,12 +1622,17 @@ export default function SettingsPage({ user }: { user: User }) {
                     style={{ animation: 'spin 0.8s linear infinite' }}
                   />
                 ) : (
-                  item.icon
+                  <ExportIcon iconType={item.iconType} size={18} />
                 )}
               </div>
-
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text)' }}>
+                <div
+                  style={{
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    color: 'var(--text)',
+                  }}
+                >
                   {item.label}
                 </div>
                 <div
@@ -1138,7 +1646,6 @@ export default function SettingsPage({ user }: { user: User }) {
                   {item.description}
                 </div>
               </div>
-
               <ChevronRight
                 size={16}
                 style={{ color: 'var(--muted)', flexShrink: 0 }}
@@ -1169,7 +1676,10 @@ export default function SettingsPage({ user }: { user: User }) {
         >
           {exporting === 'all' ? (
             <>
-              <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
+              <RefreshCw
+                size={16}
+                style={{ animation: 'spin 0.8s linear infinite' }}
+              />
               Exporting all…
             </>
           ) : (
@@ -1181,10 +1691,9 @@ export default function SettingsPage({ user }: { user: User }) {
         </button>
       </div>
 
-      {/* App Info */}
+      {/* ── App Info ── */}
       <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
         <SectionHeader icon={<Info size={16} />} title="App Information" />
-
         {[
           { label: 'App Name', value: 'My Finance Pro' },
           { label: 'Version', value: '1.0.0' },
@@ -1194,14 +1703,16 @@ export default function SettingsPage({ user }: { user: User }) {
           { label: 'Currencies', value: 'AED + INR' },
         ].map((item) => (
           <SettingRow key={item.label} label={item.label}>
-            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 700 }}>
+            <span
+              style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 700 }}
+            >
               {item.value}
             </span>
           </SettingRow>
         ))}
       </div>
 
-      {/* Danger Zone */}
+      {/* ── Danger Zone ── */}
       <div
         className="card"
         style={{
@@ -1215,7 +1726,6 @@ export default function SettingsPage({ user }: { user: User }) {
           title="Danger Zone"
           description="Irreversible actions — proceed with caution"
         />
-
         <div
           style={{
             display: 'flex',
@@ -1228,13 +1738,15 @@ export default function SettingsPage({ user }: { user: User }) {
             marginBottom: '14px',
           }}
         >
-          <AlertTriangle size={16} style={{ color: '#f97316', marginTop: '2px' }} />
+          <AlertTriangle
+            size={16}
+            style={{ color: '#f97316', marginTop: '2px' }}
+          />
           <div style={{ fontSize: '12px', color: '#9a3412', lineHeight: 1.5 }}>
             Please export your data before reset. Reset actions cannot be undone.
           </div>
         </div>
 
-        {/* Reset all finance data */}
         <div
           style={{
             display: 'flex',
@@ -1250,7 +1762,9 @@ export default function SettingsPage({ user }: { user: User }) {
           }}
         >
           <div style={{ flex: 1, minWidth: '220px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text)' }}>
+            <div
+              style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text)' }}
+            >
               Reset All My Data
             </div>
             <div
@@ -1261,12 +1775,11 @@ export default function SettingsPage({ user }: { user: User }) {
                 lineHeight: 1.5,
               }}
             >
-              Permanently delete all data for this logged-in account only:
-              transactions, cards, debts, savings, remittances, budgets, forecast data
-              and settings.
+              Permanently delete all data including opening balances,
+              transactions, cards, debts, savings, remittances, budgets and
+              settings.
             </div>
           </div>
-
           <button
             onClick={handleResetAllMyData}
             disabled={resettingData}
@@ -1290,7 +1803,6 @@ export default function SettingsPage({ user }: { user: User }) {
           </button>
         </div>
 
-        {/* Reset settings only */}
         <div
           style={{
             display: 'flex',
@@ -1305,14 +1817,17 @@ export default function SettingsPage({ user }: { user: User }) {
           }}
         >
           <div style={{ flex: 1, minWidth: '220px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text)' }}>
+            <div
+              style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text)' }}
+            >
               Reset Settings Only
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+            <div
+              style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}
+            >
               Reset preferences to default values without deleting finance data.
             </div>
           </div>
-
           <button
             onClick={handleResetSettingsOnly}
             style={{
@@ -1336,7 +1851,7 @@ export default function SettingsPage({ user }: { user: User }) {
       </div>
 
       {/* Saving indicator */}
-      {(saving || resettingData) && (
+      {(saving || savingBal || resettingData) && (
         <div
           style={{
             position: 'fixed',
@@ -1355,7 +1870,10 @@ export default function SettingsPage({ user }: { user: User }) {
             zIndex: 999,
           }}
         >
-          <RefreshCw size={14} style={{ animation: 'spin 0.8s linear infinite' }} />
+          <RefreshCw
+            size={14}
+            style={{ animation: 'spin 0.8s linear infinite' }}
+          />
           {resettingData ? 'Resetting…' : 'Saving…'}
         </div>
       )}
