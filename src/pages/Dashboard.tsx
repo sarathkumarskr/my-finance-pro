@@ -1,3 +1,4 @@
+// Dashboard.tsx
 import { useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
@@ -16,15 +17,14 @@ import {
   ChevronLeft,
   ChevronRight,
   DollarSign,
-  IndianRupee,
   RefreshCw,
   TrendingDown,
   TrendingUp,
   Wallet,
   X,
-  Building2,
-  Banknote,
+  TrendingUp as NetWorthIcon,
   CreditCard,
+  Target,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -36,7 +36,9 @@ interface Transaction {
   currency: 'AED' | 'INR';
   category: string;
   date: string;
-  paymentMethod: string;
+  paymentMethod?: string;
+  paymentMethodId?: string;
+  paymentMethodName?: string;
   note?: string;
   fromMethod?: string;
   toMethod?: string;
@@ -53,6 +55,7 @@ interface PaymentMethod {
   currency?: string;
   color?: string;
   bankName?: string;
+  isCashDefault?: boolean;
   creditLimit?: number;
 }
 
@@ -65,6 +68,21 @@ interface OpeningBalance {
   asOf: string;
 }
 
+interface SavingGoal {
+  id: string;
+  userId: string;
+  currentAmount: number;
+  currency: 'AED' | 'INR';
+}
+
+interface Debt {
+  id: string;
+  userId: string;
+  type: 'i_owe' | 'owed_to_me';
+  remainingAmount: number;
+  currency: 'AED' | 'INR';
+}
+
 type ModalType = 'none' | 'income' | 'expense' | 'transfer';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -72,11 +90,12 @@ type ModalType = 'none' | 'income' | 'expense' | 'transfer';
 const INCOME_CATEGORIES = [
   'Salary', 'Freelance', 'Business', 'Investment', 'Gift', 'Other',
 ];
-
 const EXPENSE_CATEGORIES = [
   'Rent', 'Food', 'Transport', 'Shopping', 'Medical',
   'Education', 'Entertainment', 'Utilities', 'Other',
 ];
+
+const AED_TO_INR = 22.8; // approximate rate for net worth display
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -100,15 +119,27 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-// ── Helper Components ─────────────────────────────────────────────────────────
+// ── Helper components ─────────────────────────────────────────────────────────
 
-function AEDMark({ size = 15, color = 'currentColor' }: { size?: number; color?: string }) {
+function AEDMark({
+  size = 15,
+  color = 'currentColor',
+}: {
+  size?: number;
+  color?: string;
+}) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      aria-label="AED" style={{ display: 'inline-block', flexShrink: 0 }}>
-      <path d="M7 4h5.6c4.4 0 7.4 3 7.4 8s-3 8-7.4 8H7V4Z"
-        stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M3.5 9h12.8" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" fill="none"
+      aria-label="AED"
+      style={{ display: 'inline-block', flexShrink: 0 }}
+    >
+      <path
+        d="M7 4h5.6c4.4 0 7.4 3 7.4 8s-3 8-7.4 8H7V4Z"
+        stroke={color} strokeWidth="2.2"
+        strokeLinecap="round" strokeLinejoin="round"
+      />
+      <path d="M3.5 9h12.8"  stroke={color} strokeWidth="2.2" strokeLinecap="round" />
       <path d="M3.5 15h12.8" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
     </svg>
   );
@@ -116,43 +147,13 @@ function AEDMark({ size = 15, color = 'currentColor' }: { size?: number; color?:
 
 function formatNumber(value: number) {
   return Math.abs(value || 0).toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 0, maximumFractionDigits: 2,
   });
 }
-
 function formatINR(value: number) {
   return Math.abs(value || 0).toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 0, maximumFractionDigits: 2,
   });
-}
-
-function Money({
-  amount, currency, sign = '', color, size = 14,
-}: {
-  amount: number; currency: 'AED' | 'INR';
-  sign?: string; color?: string; size?: number;
-}) {
-  const finalSign = amount < 0 ? '-' : sign;
-  const display = currency === 'INR' ? formatINR(amount) : formatNumber(amount);
-
-  if (currency === 'INR') {
-    return (
-      <span style={{ color, fontWeight: 800, fontSize: size,
-        display: 'inline-flex', alignItems: 'center', gap: 1, whiteSpace: 'nowrap' }}>
-        {finalSign}₹{display}
-      </span>
-    );
-  }
-  return (
-    <span style={{ color, fontWeight: 800, fontSize: size,
-      display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-      {finalSign}{display}
-      <AEDMark size={size} color={color || 'currentColor'} />
-      <span style={{ fontSize: Math.max(size - 4, 10), opacity: 0.8 }}>AED</span>
-    </span>
-  );
 }
 
 function pad2(n: number) { return String(n).padStart(2, '0'); }
@@ -180,6 +181,87 @@ const cardTypeIcon: Record<string, string> = {
   cash: '💵', upi: '📱', custom: '➕',
 };
 
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function SummaryCard({
+  label, value, currency, color, icon,
+}: {
+  label: string; value: number; currency: 'AED' | 'INR';
+  color: string; icon: React.ReactNode;
+}) {
+  const display = currency === 'INR'
+    ? Math.abs(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    : Math.abs(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return (
+    <div style={{
+      background: 'var(--card)', borderRadius: 16, padding: '16px 14px',
+      border: '1px solid var(--border)', minHeight: 100,
+      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+    }}>
+      <div style={{ color }}>{icon}</div>
+      <div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 16, fontWeight: 900, color }}>
+          {value < 0 ? '-' : ''}{currency === 'INR' ? '₹' : 'AED '}{display}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ✅ BalanceRow — per-method balance display
+function BalanceRow({
+  icon, label, sublabel, balance, currency, color, isLast = false,
+}: {
+  icon: string; label: string; sublabel: string;
+  balance: number; currency: 'AED' | 'INR';
+  color: string; isLast?: boolean;
+}) {
+  const display = currency === 'INR'
+    ? Math.abs(balance).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    : Math.abs(balance).toLocaleString('en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      });
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '12px 16px',
+      borderBottom: isLast ? 'none' : '1px solid var(--border)',
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 10,
+        background: color + '18',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 18, flexShrink: 0,
+      }}>
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 700, color: 'var(--text)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {label}
+        </div>
+        {sublabel && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+            {sublabel}
+          </div>
+        )}
+      </div>
+      <div style={{
+        fontSize: 14, fontWeight: 900,
+        color: balance >= 0 ? color : 'var(--danger)',
+        whiteSpace: 'nowrap',
+      }}>
+        {balance < 0 ? '-' : ''}{currency === 'INR' ? '₹' : 'AED '}{display}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function Dashboard({ user }: { user: User }) {
@@ -188,6 +270,8 @@ export default function Dashboard({ user }: { user: User }) {
   const [transactions, setTransactions]   = useState<Transaction[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [openingBal, setOpeningBal]       = useState<OpeningBalance | null>(null);
+  const [savingGoals, setSavingGoals]     = useState<SavingGoal[]>([]);
+  const [debts, setDebts]                 = useState<Debt[]>([]);
   const [loading, setLoading]             = useState(true);
   const [saving, setSaving]               = useState(false);
 
@@ -206,8 +290,10 @@ export default function Dashboard({ user }: { user: User }) {
   useEffect(() => {
     if (!user?.uid) return;
 
+    const unsubs: (() => void)[] = [];
+
     // Transactions
-    const txUnsub = onSnapshot(
+    unsubs.push(onSnapshot(
       query(collection(db, 'transactions'), where('userId', '==', user.uid)),
       (snap) => {
         const list = snap.docs
@@ -217,11 +303,11 @@ export default function Dashboard({ user }: { user: User }) {
         setTransactions(list);
         setLoading(false);
       },
-      (err) => { console.error(err); setLoading(false); }
-    );
+      () => setLoading(false)
+    ));
 
     // Payment Methods
-    const pmUnsub = onSnapshot(
+    unsubs.push(onSnapshot(
       query(collection(db, 'paymentMethods'), where('userId', '==', user.uid)),
       (snap) => {
         setPaymentMethods(
@@ -230,10 +316,10 @@ export default function Dashboard({ user }: { user: User }) {
             .filter((pm) => pm.id)
         );
       }
-    );
+    ));
 
     // Opening Balances
-    const obUnsub = onSnapshot(
+    unsubs.push(onSnapshot(
       query(collection(db, 'openingBalances'), where('userId', '==', user.uid)),
       (snap) => {
         if (!snap.empty) {
@@ -252,109 +338,141 @@ export default function Dashboard({ user }: { user: User }) {
           setOpeningBal(null);
         }
       }
-    );
+    ));
 
-    return () => { txUnsub(); pmUnsub(); obUnsub(); };
+    // Saving Goals (for net worth)
+    unsubs.push(onSnapshot(
+      query(collection(db, 'savingGoals'), where('userId', '==', user.uid)),
+      (snap) => {
+        setSavingGoals(
+          snap.docs.map((d) => ({ id: d.id, ...d.data() } as SavingGoal))
+        );
+      }
+    ));
+
+    // Debts (for net worth)
+    unsubs.push(onSnapshot(
+      query(collection(db, 'debts'), where('userId', '==', user.uid)),
+      (snap) => {
+        setDebts(
+          snap.docs.map((d) => ({ id: d.id, ...d.data() } as Debt))
+        );
+      }
+    ));
+
+    return () => unsubs.forEach((u) => u());
   }, [user.uid]);
 
   // ── Balance Calculation ─────────────────────────────────────────────────────
 
-  /**
-   * For each payment method: opening balance + income - expense
-   * from openingBal.asOf date onwards, for that specific paymentMethod id.
-   * Transfers: fromMethod → debit, toMethod → credit.
-   */
+  // ✅ Per-method balance: opening + income - expense (from asOf date)
   const getMethodCurrentBalance = (pmId: string): number => {
     const opening = openingBal?.perMethod?.[pmId] ?? 0;
     const asOf    = openingBal?.asOf ?? '1970-01-01';
 
-    const delta = transactions
+    return transactions
       .filter((tx) => tx.date >= asOf)
       .reduce((sum, tx) => {
-        if (tx.type === 'income' && tx.paymentMethod === pmId) {
+        if (tx.type === 'income'  && tx.paymentMethodId === pmId)
           return sum + (tx.amount ?? 0);
-        }
-        if (tx.type === 'expense' && tx.paymentMethod === pmId) {
+        if (tx.type === 'expense' && tx.paymentMethodId === pmId)
           return sum - (tx.amount ?? 0);
-        }
         if (tx.type === 'transfer') {
           if (tx.fromMethod === pmId) return sum - (tx.amount ?? 0);
           if (tx.toMethod   === pmId) return sum + (tx.amount ?? 0);
         }
         return sum;
-      }, 0);
-
-    return opening + delta;
+      }, opening);
   };
 
-  // UAE cash current balance
-  const getUAECashBalance = (): number => {
-    const opening = openingBal?.uaeCash ?? 0;
-    const asOf    = openingBal?.asOf ?? '1970-01-01';
-    const delta   = transactions
-      .filter((tx) => tx.date >= asOf && tx.currency === 'AED')
-      .reduce((sum, tx) => {
-        if (tx.paymentMethod === 'cash_aed' || tx.paymentMethod === 'cash') {
-          if (tx.type === 'income')  return sum + (tx.amount ?? 0);
-          if (tx.type === 'expense') return sum - (tx.amount ?? 0);
-        }
-        return sum;
-      }, 0);
-    return opening + delta;
-  };
-
-  // India cash current balance
-  const getIndiaCashBalance = (): number => {
-    const opening = openingBal?.indiaCash ?? 0;
-    const asOf    = openingBal?.asOf ?? '1970-01-01';
-    const delta   = transactions
-      .filter((tx) => tx.date >= asOf && tx.currency === 'INR')
-      .reduce((sum, tx) => {
-        if (tx.paymentMethod === 'cash_inr') {
-          if (tx.type === 'income')  return sum + (tx.amount ?? 0);
-          if (tx.type === 'expense') return sum - (tx.amount ?? 0);
-        }
-        return sum;
-      }, 0);
-    return opening + delta;
-  };
-
-  // Grouped methods
-  const uaeMethods    = paymentMethods.filter((pm) =>
-    pm.country === 'UAE' || pm.country === 'Both'
+  // ✅ FIX: Separate UAE-only and India-only methods to avoid double counting
+  // 'Both' country methods are counted in UAE (AED) only
+  const uaeOnlyMethods = paymentMethods.filter(
+    (pm) => pm.country === 'UAE' || pm.country === 'Both'
   );
-  const indiaMethods  = paymentMethods.filter((pm) =>
-    pm.country === 'India' || pm.country === 'Both'
+  const indiaOnlyMethods = paymentMethods.filter(
+    (pm) => pm.country === 'India'
   );
 
-  // Total UAE balance (cash + all UAE methods)
-  const totalUAEBalance =
-    (openingBal ? getUAECashBalance() : 0) +
-    uaeMethods.reduce((sum, pm) => sum + getMethodCurrentBalance(pm.id), 0);
+  // ✅ FIX: uaeCash + indiaCash are tracked via isCashDefault methods now
+  // Total = sum of all method balances (cash methods include cash balance)
+  const totalUAEBalance = openingBal
+    ? uaeOnlyMethods.reduce(
+        (sum, pm) => sum + getMethodCurrentBalance(pm.id), 0
+      )
+    : 0;
 
-  // Total India balance
-  const totalIndiaBalance =
-    (openingBal ? getIndiaCashBalance() : 0) +
-    indiaMethods.reduce((sum, pm) => sum + getMethodCurrentBalance(pm.id), 0);
+  const totalIndiaBalance = openingBal
+    ? indiaOnlyMethods.reduce(
+        (sum, pm) => sum + getMethodCurrentBalance(pm.id), 0
+      )
+    : 0;
 
-  // ── Monthly summary (for selected month) ───────────────────────────────────
+  // ── Net Worth Calculation ───────────────────────────────────────────────────
 
-  const monthTx = transactions.filter(
+  // Convert everything to AED for net worth
+  const savingsAED = savingGoals
+    .filter((g) => g.currency === 'AED')
+    .reduce((s, g) => s + (g.currentAmount ?? 0), 0);
+
+  const savingsINR = savingGoals
+    .filter((g) => g.currency === 'INR')
+    .reduce((s, g) => s + (g.currentAmount ?? 0), 0);
+
+  const receivablesAED = debts
+    .filter((d) => d.type === 'owed_to_me' && d.currency === 'AED')
+    .reduce((s, d) => s + (d.remainingAmount ?? 0), 0);
+
+  const liabilitiesAED = debts
+    .filter((d) => d.type === 'i_owe' && d.currency === 'AED')
+    .reduce((s, d) => s + (d.remainingAmount ?? 0), 0);
+
+  const receivablesINR = debts
+    .filter((d) => d.type === 'owed_to_me' && d.currency === 'INR')
+    .reduce((s, d) => s + (d.remainingAmount ?? 0), 0);
+
+  const liabilitiesINR = debts
+    .filter((d) => d.type === 'i_owe' && d.currency === 'INR')
+    .reduce((s, d) => s + (d.remainingAmount ?? 0), 0);
+
+  // Total assets in AED (INR converted)
+  const totalAssetsAED =
+    totalUAEBalance +
+    (totalIndiaBalance / AED_TO_INR) +
+    savingsAED +
+    (savingsINR / AED_TO_INR) +
+    receivablesAED +
+    (receivablesINR / AED_TO_INR);
+
+  const totalLiabilitiesAED =
+    liabilitiesAED + (liabilitiesINR / AED_TO_INR);
+
+  const netWorthAED = totalAssetsAED - totalLiabilitiesAED;
+
+  // ── Monthly summary ─────────────────────────────────────────────────────────
+
+  const monthTx    = transactions.filter(
     (t) => typeof t.date === 'string' && t.date.startsWith(selectedMonth)
   );
-
-  const aedIncome  = monthTx.filter((t) => t.type === 'income'  && t.currency === 'AED').reduce((s, t) => s + (t.amount || 0), 0);
-  const aedExpense = monthTx.filter((t) => t.type === 'expense' && t.currency === 'AED').reduce((s, t) => s + (t.amount || 0), 0);
-  const inrIncome  = monthTx.filter((t) => t.type === 'income'  && t.currency === 'INR').reduce((s, t) => s + (t.amount || 0), 0);
-  const inrExpense = monthTx.filter((t) => t.type === 'expense' && t.currency === 'INR').reduce((s, t) => s + (t.amount || 0), 0);
+  const aedIncome  = monthTx.filter(
+    (t) => t.type === 'income'  && t.currency === 'AED'
+  ).reduce((s, t) => s + (t.amount || 0), 0);
+  const aedExpense = monthTx.filter(
+    (t) => t.type === 'expense' && t.currency === 'AED'
+  ).reduce((s, t) => s + (t.amount || 0), 0);
+  const inrIncome  = monthTx.filter(
+    (t) => t.type === 'income'  && t.currency === 'INR'
+  ).reduce((s, t) => s + (t.amount || 0), 0);
+  const inrExpense = monthTx.filter(
+    (t) => t.type === 'expense' && t.currency === 'INR'
+  ).reduce((s, t) => s + (t.amount || 0), 0);
 
   const recentTransactions = transactions.slice(0, 10);
 
   // ── Form helpers ────────────────────────────────────────────────────────────
 
-  const getDefaultDate = () => {
-    return selectedMonth === getCurrentMonth() ? getToday() : `${selectedMonth}-01`;
-  };
+  const getDefaultDate = () =>
+    selectedMonth === getCurrentMonth() ? getToday() : `${selectedMonth}-01`;
 
   const resetForm = () => {
     setAmount(''); setCurrency('AED'); setCategory('');
@@ -367,17 +485,25 @@ export default function Dashboard({ user }: { user: User }) {
 
   const validateAmount = () => {
     const n = parseFloat(amount);
-    if (!amount || Number.isNaN(n) || n <= 0) { toast.error('Enter a valid amount'); return null; }
+    if (!amount || Number.isNaN(n) || n <= 0) {
+      toast.error('Enter a valid amount'); return null;
+    }
     return n;
   };
 
   const getMethodName = (id: string) => {
     if (!id) return '';
-    if (id === 'cash_aed') return 'Cash AED';
-    if (id === 'cash_inr') return 'Cash INR';
-    if (id === 'cash')     return 'Cash';
     return paymentMethods.find((m) => m.id === id)?.name || id;
   };
+
+  // Filter methods by currency for modal
+  const aedMethods = paymentMethods.filter(
+    (pm) => pm.country === 'UAE' || pm.country === 'Both'
+  );
+  const inrMethods = paymentMethods.filter(
+    (pm) => pm.country === 'India' || pm.country === 'Both'
+  );
+  const modalMethods = currency === 'AED' ? aedMethods : inrMethods;
 
   // ── Save handlers ───────────────────────────────────────────────────────────
 
@@ -388,18 +514,26 @@ export default function Dashboard({ user }: { user: User }) {
     }
     setSaving(true);
     try {
-      const data = {
-        userId: user.uid, type: 'income' as const,
-        amount: n, currency, category, date, paymentMethod,
+      const selectedPM = paymentMethods.find((m) => m.id === paymentMethod);
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid, type: 'income',
+        amount: n, currency, category, date,
+        paymentMethodId: paymentMethod,
+        paymentMethod: selectedPM?.type || null,
+        paymentMethodName: selectedPM?.name || null,
+        paymentMethodType: selectedPM?.type || null,
         note: note || null,
         country: currency === 'AED' ? 'UAE' : 'India',
         createdAt: Timestamp.now(),
-      };
-      await addDoc(collection(db, 'transactions'), data);
+      });
       toast.success('Income added');
       closeModal();
-    } catch (err) { console.error(err); toast.error('Failed to save income'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save income');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveExpense = async () => {
@@ -409,18 +543,26 @@ export default function Dashboard({ user }: { user: User }) {
     }
     setSaving(true);
     try {
-      const data = {
-        userId: user.uid, type: 'expense' as const,
-        amount: n, currency, category, date, paymentMethod,
+      const selectedPM = paymentMethods.find((m) => m.id === paymentMethod);
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid, type: 'expense',
+        amount: n, currency, category, date,
+        paymentMethodId: paymentMethod,
+        paymentMethod: selectedPM?.type || null,
+        paymentMethodName: selectedPM?.name || null,
+        paymentMethodType: selectedPM?.type || null,
         note: note || null,
         country: currency === 'AED' ? 'UAE' : 'India',
         createdAt: Timestamp.now(),
-      };
-      await addDoc(collection(db, 'transactions'), data);
+      });
       toast.success('Expense added');
       closeModal();
-    } catch (err) { console.error(err); toast.error('Failed to save expense'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save expense');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveTransfer = async () => {
@@ -428,37 +570,44 @@ export default function Dashboard({ user }: { user: User }) {
     if (!n || !fromMethod || !toMethod || !date) {
       toast.error('Please fill all required fields'); return;
     }
-    if (fromMethod === toMethod) { toast.error('From and To cannot be same'); return; }
+    if (fromMethod === toMethod) {
+      toast.error('From and To cannot be same'); return;
+    }
     setSaving(true);
     try {
-      const data = {
-        userId: user.uid, type: 'transfer' as const,
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid, type: 'transfer',
         amount: n, currency, category: 'Transfer', date,
-        paymentMethod: fromMethod, fromMethod, toMethod,
+        paymentMethodId: fromMethod,
+        fromMethod, toMethod,
         note: note || null,
         country: currency === 'AED' ? 'UAE' : 'India',
         createdAt: Timestamp.now(),
-      };
-      await addDoc(collection(db, 'transactions'), data);
+      });
       toast.success('Transfer recorded');
       closeModal();
-    } catch (err) { console.error(err); toast.error('Failed to save transfer'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save transfer');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── UI helpers ──────────────────────────────────────────────────────────────
 
   const getTypeColor = (type: string) => {
-    if (type === 'income')   return 'var(--success)';
-    if (type === 'expense')  return 'var(--danger)';
+    if (type === 'income')  return 'var(--success)';
+    if (type === 'expense') return 'var(--danger)';
     return 'var(--primary)';
   };
-
   const getTypeIcon = (type: string) => {
-    if (type === 'income')   return <TrendingUp size={17} color="var(--success)" />;
-    if (type === 'expense')  return <TrendingDown size={17} color="var(--danger)" />;
+    if (type === 'income')  return <TrendingUp   size={17} color="var(--success)" />;
+    if (type === 'expense') return <TrendingDown size={17} color="var(--danger)"  />;
     return <ArrowLeftRight size={17} color="var(--primary)" />;
   };
+
+  // ── Modal sub-components ────────────────────────────────────────────────────
 
   const CurrencyToggle = () => (
     <div style={{ gridColumn: '1/-1' }}>
@@ -467,14 +616,18 @@ export default function Dashboard({ user }: { user: User }) {
         {(['AED', 'INR'] as const).map((c) => {
           const active = currency === c;
           return (
-            <button key={c} type="button" onClick={() => setCurrency(c)}
+            <button key={c} type="button" onClick={() => {
+              setCurrency(c);
+              setPaymentMethod('');
+            }}
               style={{
                 padding: '11px 10px', borderRadius: 12,
                 border: `2px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
                 background: active ? 'var(--primary)' : 'var(--card)',
                 color: active ? '#fff' : 'var(--text)',
                 fontWeight: 800, cursor: 'pointer', fontSize: 14,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'center', gap: 6,
               }}
             >
               {c === 'AED'
@@ -492,47 +645,86 @@ export default function Dashboard({ user }: { user: User }) {
       <label style={labelStyle}>Amount *</label>
       <div style={{ position: 'relative' }}>
         <div style={{
-          position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-          color: 'var(--muted)', display: 'flex', alignItems: 'center',
+          position: 'absolute', left: 12, top: '50%',
+          transform: 'translateY(-50%)', color: 'var(--muted)',
+          display: 'flex', alignItems: 'center',
           fontWeight: 800, pointerEvents: 'none',
         }}>
           {currency === 'AED' ? <AEDMark size={18} /> : '₹'}
         </div>
-        <input type="number" inputMode="decimal" placeholder="0.00"
+        <input
+          type="number" inputMode="decimal" placeholder="0.00"
           value={amount} onChange={(e) => setAmount(e.target.value)}
-          style={{ ...inputStyle, fontSize: 22, fontWeight: 800,
-            paddingLeft: currency === 'AED' ? 42 : 32 }}
+          style={{
+            ...inputStyle, fontSize: 22, fontWeight: 800,
+            paddingLeft: currency === 'AED' ? 42 : 32,
+          }}
         />
       </div>
     </div>
   );
 
-  const CashOptions = () => (
-    <>
-      <option value="cash_aed">Cash AED</option>
-      <option value="cash_inr">Cash INR</option>
-    </>
+  const MethodSelector = ({ label }: { label: string }) => (
+    <div style={{ gridColumn: '1/-1' }}>
+      <label style={labelStyle}>{label} *</label>
+      {modalMethods.length === 0 ? (
+        <div style={{
+          padding: 12, borderRadius: 10,
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.2)',
+          fontSize: 13, color: 'var(--danger)',
+        }}>
+          No payment methods for {currency === 'AED' ? 'UAE' : 'India'}.
+          Add one in Cards page.
+        </div>
+      ) : (
+        <select
+          value={paymentMethod}
+          onChange={(e) => setPaymentMethod(e.target.value)}
+          style={inputStyle}
+        >
+          <option value="">Select method</option>
+          {modalMethods.map((m) => (
+            <option key={m.id} value={m.id}>
+              {cardTypeIcon[m.type] || '💳'} {m.name}
+              {m.bankName ? ` (${m.bankName})` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
   );
 
   const renderModalContent = () => {
     if (modal === 'transfer') {
       return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
+        }}>
           <AmountInput />
           <CurrencyToggle />
+
           <div style={{ gridColumn: '1/-1' }}>
             <label style={labelStyle}>From *</label>
-            <select value={fromMethod} onChange={(e) => setFromMethod(e.target.value)} style={inputStyle}>
+            <select
+              value={fromMethod}
+              onChange={(e) => setFromMethod(e.target.value)}
+              style={inputStyle}
+            >
               <option value="">Select source</option>
               {paymentMethods.map((m) => (
-                <option key={m.id} value={m.id}>{m.name} {m.currency ? `(${m.currency})` : ''}</option>
+                <option key={m.id} value={m.id}>
+                  {cardTypeIcon[m.type] || '💳'} {m.name}
+                  {m.bankName ? ` (${m.bankName})` : ''}
+                </option>
               ))}
-              <CashOptions />
             </select>
           </div>
+
           <div style={{
-            gridColumn: '1/-1', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: 12, padding: '2px 0',
+            gridColumn: '1/-1', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 12, padding: '2px 0',
           }}>
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
             <div style={{
@@ -544,24 +736,39 @@ export default function Dashboard({ user }: { user: User }) {
             </div>
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
+
           <div style={{ gridColumn: '1/-1' }}>
             <label style={labelStyle}>To *</label>
-            <select value={toMethod} onChange={(e) => setToMethod(e.target.value)} style={inputStyle}>
+            <select
+              value={toMethod}
+              onChange={(e) => setToMethod(e.target.value)}
+              style={inputStyle}
+            >
               <option value="">Select destination</option>
               {paymentMethods.map((m) => (
-                <option key={m.id} value={m.id}>{m.name} {m.currency ? `(${m.currency})` : ''}</option>
+                <option key={m.id} value={m.id}>
+                  {cardTypeIcon[m.type] || '💳'} {m.name}
+                  {m.bankName ? ` (${m.bankName})` : ''}
+                </option>
               ))}
-              <CashOptions />
             </select>
           </div>
+
           <div style={{ gridColumn: '1/-1' }}>
             <label style={labelStyle}>Date *</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+            <input
+              type="date" value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={inputStyle}
+            />
           </div>
           <div style={{ gridColumn: '1/-1' }}>
             <label style={labelStyle}>Note</label>
-            <input type="text" placeholder="Optional note" value={note}
-              onChange={(e) => setNote(e.target.value)} style={inputStyle} />
+            <input
+              type="text" placeholder="Optional note" value={note}
+              onChange={(e) => setNote(e.target.value)}
+              style={inputStyle}
+            />
           </div>
         </div>
       );
@@ -569,9 +776,12 @@ export default function Dashboard({ user }: { user: User }) {
 
     const cats = modal === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
+      }}>
         <AmountInput />
         <CurrencyToggle />
+
         <div style={{ gridColumn: '1/-1' }}>
           <label style={labelStyle}>Category *</label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -593,24 +803,26 @@ export default function Dashboard({ user }: { user: User }) {
             })}
           </div>
         </div>
-        <div style={{ gridColumn: '1/-1' }}>
-          <label style={labelStyle}>Payment Method *</label>
-          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={inputStyle}>
-            <option value="">Select method</option>
-            {paymentMethods.map((m) => (
-              <option key={m.id} value={m.id}>{m.name} {m.currency ? `(${m.currency})` : ''}</option>
-            ))}
-            <CashOptions />
-          </select>
-        </div>
+
+        <MethodSelector
+          label={modal === 'income' ? 'Received Into' : 'Payment Method'}
+        />
+
         <div style={{ gridColumn: '1/-1' }}>
           <label style={labelStyle}>Date *</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+          <input
+            type="date" value={date}
+            onChange={(e) => setDate(e.target.value)}
+            style={inputStyle}
+          />
         </div>
         <div style={{ gridColumn: '1/-1' }}>
           <label style={labelStyle}>Note</label>
-          <input type="text" placeholder="Optional note" value={note}
-            onChange={(e) => setNote(e.target.value)} style={inputStyle} />
+          <input
+            type="text" placeholder="Optional note" value={note}
+            onChange={(e) => setNote(e.target.value)}
+            style={inputStyle}
+          />
         </div>
       </div>
     );
@@ -621,20 +833,22 @@ export default function Dashboard({ user }: { user: User }) {
   return (
     <div style={{ padding: '22px 16px 40px', maxWidth: 900, margin: '0 auto' }}>
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between',
-        alignItems: 'flex-start', marginBottom: 22, gap: 12 }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'flex-start', marginBottom: 22, gap: 12,
+      }}>
         <div>
-          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Welcome back,</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>
+            Welcome back,
+          </div>
           <div style={{ fontSize: 25, fontWeight: 900 }}>
             {user.displayName?.split(' ')[0] ?? 'Friend'} 👋
           </div>
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════
-          CURRENT BALANCE WIDGET
-      ══════════════════════════════════════════════ */}
+      {/* ── Current Balance Widget ── */}
       {openingBal ? (
         <div style={{ marginBottom: 24 }}>
           <div style={{
@@ -644,117 +858,336 @@ export default function Dashboard({ user }: { user: User }) {
             💰 CURRENT BALANCE
           </div>
 
-          {/* UAE + India total cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          {/* UAE + India totals */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gap: 12, marginBottom: 12,
+          }}>
             {/* UAE Total */}
             <div style={{
-              background: 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))',
+              background:
+                'linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05))',
               border: '1px solid rgba(16,185,129,0.3)',
               borderRadius: 20, padding: '18px 16px',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center',
+                gap: 8, marginBottom: 10,
+              }}>
                 <span style={{ fontSize: 20 }}>🇦🇪</span>
-                <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>UAE Total</span>
+                <span style={{
+                  fontSize: 12, color: 'var(--muted)', fontWeight: 700,
+                }}>
+                  UAE Total
+                </span>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 900,
-                color: totalUAEBalance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                {totalUAEBalance < 0 ? '-' : ''}AED {formatNumber(totalUAEBalance)}
+              <div style={{
+                fontSize: 22, fontWeight: 900,
+                color: totalUAEBalance >= 0
+                  ? 'var(--success)' : 'var(--danger)',
+              }}>
+                {totalUAEBalance < 0 ? '-' : ''}
+                AED {formatNumber(totalUAEBalance)}
               </div>
-              {openingBal.asOf && (
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  since {openingBal.asOf}
-                </div>
-              )}
+              <div style={{
+                fontSize: 11, color: 'var(--muted)', marginTop: 4,
+              }}>
+                since {openingBal.asOf}
+              </div>
             </div>
 
             {/* India Total */}
             <div style={{
-              background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))',
+              background:
+                'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05))',
               border: '1px solid rgba(245,158,11,0.3)',
               borderRadius: 20, padding: '18px 16px',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center',
+                gap: 8, marginBottom: 10,
+              }}>
                 <span style={{ fontSize: 20 }}>🇮🇳</span>
-                <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>India Total</span>
+                <span style={{
+                  fontSize: 12, color: 'var(--muted)', fontWeight: 700,
+                }}>
+                  India Total
+                </span>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 900,
-                color: totalIndiaBalance >= 0 ? 'var(--warning)' : 'var(--danger)' }}>
-                {totalIndiaBalance < 0 ? '-' : ''}₹{formatINR(totalIndiaBalance)}
+              <div style={{
+                fontSize: 22, fontWeight: 900,
+                color: totalIndiaBalance >= 0
+                  ? 'var(--warning)' : 'var(--danger)',
+              }}>
+                {totalIndiaBalance < 0 ? '-' : ''}
+                ₹{formatINR(totalIndiaBalance)}
               </div>
-              {openingBal.asOf && (
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  since {openingBal.asOf}
-                </div>
-              )}
+              <div style={{
+                fontSize: 11, color: 'var(--muted)', marginTop: 4,
+              }}>
+                since {openingBal.asOf}
+              </div>
             </div>
           </div>
 
           {/* Per-method breakdown */}
           <div style={{
             background: 'var(--card)', border: '1px solid var(--border)',
-            borderRadius: 18, overflow: 'hidden',
+            borderRadius: 18, overflow: 'hidden', marginBottom: 12,
           }}>
-            {/* UAE Cash */}
-            <BalanceRow
-              icon="💵" label="Cash (AED)" sublabel="UAE"
-              balance={getUAECashBalance()} currency="AED"
-              color="var(--success)"
-            />
+            {/* UAE section */}
+            <div style={{
+              padding: '8px 16px',
+              background: 'rgba(16,185,129,0.05)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 11, fontWeight: 800,
+              color: 'var(--success)', letterSpacing: 0.5,
+            }}>
+              🇦🇪 UAE ACCOUNTS
+            </div>
 
-            {/* UAE methods */}
-            {uaeMethods.map((pm, i) => {
-              const bal = getMethodCurrentBalance(pm.id);
-              return (
-                <BalanceRow key={pm.id}
+            {uaeOnlyMethods.length === 0 ? (
+              <div style={{
+                padding: '12px 16px', fontSize: 13, color: 'var(--muted)',
+              }}>
+                No UAE payment methods
+              </div>
+            ) : (
+              uaeOnlyMethods.map((pm, i) => (
+                <BalanceRow
+                  key={pm.id}
                   icon={cardTypeIcon[pm.type] || '💳'}
                   label={pm.name}
-                  sublabel={pm.bankName || ''}
-                  balance={bal} currency="AED"
-                  color={pm.color || 'var(--primary)'}
-                  isLast={i === uaeMethods.length - 1 && indiaMethods.length === 0}
+                  sublabel={pm.bankName || cardTypeIcon[pm.type] || ''}
+                  balance={getMethodCurrentBalance(pm.id)}
+                  currency="AED"
+                  color={pm.color || 'var(--success)'}
+                  isLast={i === uaeOnlyMethods.length - 1}
                 />
-              );
-            })}
+              ))
+            )}
 
-            {/* Divider */}
-            {indiaMethods.length > 0 || true ? (
+            {/* India section */}
+            <div style={{
+              padding: '8px 16px',
+              background: 'rgba(245,158,11,0.05)',
+              borderTop: '1px solid var(--border)',
+              borderBottom: indiaOnlyMethods.length > 0
+                ? '1px solid var(--border)' : 'none',
+              fontSize: 11, fontWeight: 800,
+              color: 'var(--warning)', letterSpacing: 0.5,
+            }}>
+              🇮🇳 INDIA ACCOUNTS
+            </div>
+
+            {indiaOnlyMethods.length === 0 ? (
               <div style={{
-                padding: '8px 16px',
-                background: 'rgba(245,158,11,0.05)',
-                borderTop: '1px solid var(--border)',
-                borderBottom: '1px solid var(--border)',
-                fontSize: 11, fontWeight: 800, color: 'var(--warning)',
-                letterSpacing: 0.5,
+                padding: '12px 16px', fontSize: 13, color: 'var(--muted)',
               }}>
-                🇮🇳 INDIA
+                No India payment methods
               </div>
-            ) : null}
-
-            {/* India Cash */}
-            <BalanceRow
-              icon="💵" label="Cash (INR)" sublabel="India"
-              balance={getIndiaCashBalance()} currency="INR"
-              color="var(--warning)"
-            />
-
-            {/* India methods */}
-            {indiaMethods.map((pm, i) => {
-              const bal = getMethodCurrentBalance(pm.id);
-              return (
-                <BalanceRow key={pm.id}
+            ) : (
+              indiaOnlyMethods.map((pm, i) => (
+                <BalanceRow
+                  key={pm.id}
                   icon={cardTypeIcon[pm.type] || '🏦'}
                   label={pm.name}
                   sublabel={pm.bankName || ''}
-                  balance={bal} currency="INR"
+                  balance={getMethodCurrentBalance(pm.id)}
+                  currency="INR"
                   color={pm.color || 'var(--warning)'}
-                  isLast={i === indiaMethods.length - 1}
+                  isLast={i === indiaOnlyMethods.length - 1}
                 />
-              );
-            })}
+              ))
+            )}
+          </div>
+
+          {/* ── Net Worth Widget ── */}
+          <div style={{
+            background: 'var(--card)',
+            border: `1px solid ${netWorthAED >= 0
+              ? 'rgba(99,102,241,0.3)' : 'rgba(239,68,68,0.3)'}`,
+            borderRadius: 20, padding: '18px 16px',
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', marginBottom: 16,
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 10,
+                  background: 'rgba(99,102,241,0.15)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <NetWorthIcon size={18} color="var(--primary)" />
+                </div>
+                <div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 800, color: 'var(--text)',
+                  }}>
+                    Net Worth
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                    INR converted @ {AED_TO_INR} per AED
+                  </div>
+                </div>
+              </div>
+              <div style={{
+                fontSize: 22, fontWeight: 900,
+                color: netWorthAED >= 0 ? 'var(--primary)' : 'var(--danger)',
+              }}>
+                {netWorthAED < 0 ? '-' : ''}
+                AED {formatNumber(netWorthAED)}
+              </div>
+            </div>
+
+            {/* Breakdown rows */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* UAE Balance */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', fontSize: 13,
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center',
+                  gap: 8, color: 'var(--muted)',
+                }}>
+                  <Wallet size={14} color="var(--success)" />
+                  🇦🇪 UAE Accounts
+                </div>
+                <span style={{
+                  fontWeight: 700,
+                  color: totalUAEBalance >= 0
+                    ? 'var(--success)' : 'var(--danger)',
+                }}>
+                  + AED {formatNumber(totalUAEBalance)}
+                </span>
+              </div>
+
+              {/* India Balance */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', fontSize: 13,
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center',
+                  gap: 8, color: 'var(--muted)',
+                }}>
+                  <Wallet size={14} color="var(--warning)" />
+                  🇮🇳 India Accounts
+                </div>
+                <span style={{
+                  fontWeight: 700,
+                  color: totalIndiaBalance >= 0
+                    ? 'var(--success)' : 'var(--danger)',
+                }}>
+                  + ₹{formatINR(totalIndiaBalance)}
+                  <span style={{
+                    fontSize: 10, color: 'var(--muted)',
+                    marginLeft: 4, fontWeight: 600,
+                  }}>
+                    (≈ AED {formatNumber(totalIndiaBalance / AED_TO_INR)})
+                  </span>
+                </span>
+              </div>
+
+              {/* Savings Goals */}
+              {(savingsAED > 0 || savingsINR > 0) && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', fontSize: 13,
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    gap: 8, color: 'var(--muted)',
+                  }}>
+                    <Target size={14} color="var(--primary)" />
+                    Savings Goals
+                  </div>
+                  <span style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                    {savingsAED > 0 && `+ AED ${formatNumber(savingsAED)}`}
+                    {savingsAED > 0 && savingsINR > 0 && ' · '}
+                    {savingsINR > 0 && `+ ₹${formatINR(savingsINR)}`}
+                  </span>
+                </div>
+              )}
+
+              {/* Receivables */}
+              {(receivablesAED > 0 || receivablesINR > 0) && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', fontSize: 13,
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    gap: 8, color: 'var(--muted)',
+                  }}>
+                    <CreditCard size={14} color="var(--success)" />
+                    Owed to Me
+                  </div>
+                  <span style={{ fontWeight: 700, color: 'var(--success)' }}>
+                    {receivablesAED > 0 && `+ AED ${formatNumber(receivablesAED)}`}
+                    {receivablesAED > 0 && receivablesINR > 0 && ' · '}
+                    {receivablesINR > 0 && `+ ₹${formatINR(receivablesINR)}`}
+                  </span>
+                </div>
+              )}
+
+              {/* Liabilities */}
+              {(liabilitiesAED > 0 || liabilitiesINR > 0) && (
+                <>
+                  <div style={{
+                    height: 1, background: 'var(--border)', margin: '4px 0',
+                  }} />
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center', fontSize: 13,
+                  }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center',
+                      gap: 8, color: 'var(--muted)',
+                    }}>
+                      <CreditCard size={14} color="var(--danger)" />
+                      I Owe
+                    </div>
+                    <span style={{ fontWeight: 700, color: 'var(--danger)' }}>
+                      {liabilitiesAED > 0 && `- AED ${formatNumber(liabilitiesAED)}`}
+                      {liabilitiesAED > 0 && liabilitiesINR > 0 && ' · '}
+                      {liabilitiesINR > 0 && `- ₹${formatINR(liabilitiesINR)}`}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {/* Net Worth total divider */}
+              <div style={{
+                height: 1, background: 'var(--border)', margin: '4px 0',
+              }} />
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center',
+              }}>
+                <span style={{
+                  fontSize: 13, fontWeight: 800, color: 'var(--text)',
+                }}>
+                  Total Net Worth
+                </span>
+                <span style={{
+                  fontSize: 16, fontWeight: 900,
+                  color: netWorthAED >= 0 ? 'var(--primary)' : 'var(--danger)',
+                }}>
+                  {netWorthAED < 0 ? '-' : ''}
+                  AED {formatNumber(netWorthAED)}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
-        /* No opening balance set yet */
+        /* No opening balance — prompt */
         <div style={{
           marginBottom: 24, padding: '16px 20px',
           background: 'rgba(99,102,241,0.08)',
@@ -764,24 +1197,31 @@ export default function Dashboard({ user }: { user: User }) {
         }}>
           <Wallet size={28} style={{ color: 'var(--primary)', flexShrink: 0 }} />
           <div>
-            <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--text)' }}>
+            <div style={{
+              fontWeight: 800, fontSize: 14, color: 'var(--text)',
+            }}>
               Set Opening Balances
             </div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
-              Go to <strong style={{ color: 'var(--primary)' }}>Settings → Opening Balances</strong> to see live balance per account.
+              Go to{' '}
+              <strong style={{ color: 'var(--primary)' }}>
+                Settings → Opening Balances
+              </strong>{' '}
+              to see live balance per account.
             </div>
           </div>
         </div>
       )}
 
-      {/* Month Picker */}
+      {/* ── Month Picker ── */}
       <div style={{
         background: 'var(--card)', border: '1px solid var(--border)',
         borderRadius: 18, padding: 14, marginBottom: 20,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 12, flexWrap: 'wrap',
+        display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
       }}>
-        <button type="button" onClick={() => setSelectedMonth((m) => shiftMonth(m, -1))}
+        <button type="button"
+          onClick={() => setSelectedMonth((m) => shiftMonth(m, -1))}
           style={{
             width: 40, height: 40, borderRadius: 12,
             border: '1px solid var(--border)', background: 'var(--bg)',
@@ -790,20 +1230,32 @@ export default function Dashboard({ user }: { user: User }) {
           }}>
           <ChevronLeft size={20} />
         </button>
+
         <div style={{ textAlign: 'center', flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 800,
-            letterSpacing: 0.6, marginBottom: 3 }}>
+          <div style={{
+            fontSize: 11, color: 'var(--muted)', fontWeight: 800,
+            letterSpacing: 0.6, marginBottom: 3,
+          }}>
             MONTHLY SUMMARY
           </div>
           <div style={{ fontSize: 18, fontWeight: 900 }}>
             {getMonthLabel(selectedMonth)}
           </div>
         </div>
-        <input type="month" value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value || getCurrentMonth())}
-          style={{ ...inputStyle, width: 150, padding: '9px 10px', fontWeight: 800 }}
+
+        <input
+          type="month" value={selectedMonth}
+          onChange={(e) =>
+            setSelectedMonth(e.target.value || getCurrentMonth())
+          }
+          style={{
+            ...inputStyle, width: 150,
+            padding: '9px 10px', fontWeight: 800,
+          }}
         />
-        <button type="button" onClick={() => setSelectedMonth((m) => shiftMonth(m, 1))}
+
+        <button type="button"
+          onClick={() => setSelectedMonth((m) => shiftMonth(m, 1))}
           style={{
             width: 40, height: 40, borderRadius: 12,
             border: '1px solid var(--border)', background: 'var(--bg)',
@@ -814,55 +1266,105 @@ export default function Dashboard({ user }: { user: User }) {
         </button>
       </div>
 
-      {/* AED Monthly Summary */}
+      {/* ── AED Monthly Summary ── */}
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 900,
+        <div style={{
+          fontSize: 12, color: 'var(--muted)', fontWeight: 900,
           letterSpacing: 0.5, marginBottom: 9,
-          display: 'flex', alignItems: 'center', gap: 6 }}>
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
           🇦🇪 UAE — <AEDMark size={14} color="var(--muted)" /> AED
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          <SummaryCard label="Income"  value={aedIncome}  currency="AED" color="var(--success)" icon={<TrendingUp size={20} />} />
-          <SummaryCard label="Expense" value={aedExpense} currency="AED" color="var(--danger)"  icon={<TrendingDown size={20} />} />
-          <SummaryCard label="This Month" value={aedIncome - aedExpense} currency="AED"
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12,
+        }}>
+          <SummaryCard
+            label="Income" value={aedIncome} currency="AED"
+            color="var(--success)" icon={<TrendingUp size={20} />}
+          />
+          <SummaryCard
+            label="Expense" value={aedExpense} currency="AED"
+            color="var(--danger)" icon={<TrendingDown size={20} />}
+          />
+          <SummaryCard
+            label="This Month" value={aedIncome - aedExpense} currency="AED"
             color={aedIncome - aedExpense >= 0 ? 'var(--primary)' : 'var(--danger)'}
-            icon={<Wallet size={20} />} />
+            icon={<Wallet size={20} />}
+          />
         </div>
       </div>
 
-      {/* INR Monthly Summary */}
+      {/* ── INR Monthly Summary ── */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 900,
-          letterSpacing: 0.5, marginBottom: 9 }}>
+        <div style={{
+          fontSize: 12, color: 'var(--muted)', fontWeight: 900,
+          letterSpacing: 0.5, marginBottom: 9,
+        }}>
           🇮🇳 India — ₹ INR
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          <SummaryCard label="Income"  value={inrIncome}  currency="INR" color="var(--success)" icon={<TrendingUp size={20} />} />
-          <SummaryCard label="Expense" value={inrExpense} currency="INR" color="var(--danger)"  icon={<TrendingDown size={20} />} />
-          <SummaryCard label="This Month" value={inrIncome - inrExpense} currency="INR"
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12,
+        }}>
+          <SummaryCard
+            label="Income" value={inrIncome} currency="INR"
+            color="var(--success)" icon={<TrendingUp size={20} />}
+          />
+          <SummaryCard
+            label="Expense" value={inrExpense} currency="INR"
+            color="var(--danger)" icon={<TrendingDown size={20} />}
+          />
+          <SummaryCard
+            label="This Month" value={inrIncome - inrExpense} currency="INR"
             color={inrIncome - inrExpense >= 0 ? 'var(--primary)' : 'var(--danger)'}
-            icon={<Wallet size={20} />} />
+            icon={<Wallet size={20} />}
+          />
         </div>
       </div>
 
-      {/* Quick Actions */}
+      {/* ── Quick Actions ── */}
       <div style={{ marginBottom: 26 }}>
-        <div style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 900,
-          letterSpacing: 0.5, marginBottom: 12 }}>
+        <div style={{
+          fontSize: 13, color: 'var(--muted)', fontWeight: 900,
+          letterSpacing: 0.5, marginBottom: 12,
+        }}>
           QUICK ACTIONS
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12,
+        }}>
           {[
-            { label: 'Add Income',   icon: <TrendingUp size={26} />,    color: 'var(--success)', bg: 'rgba(34,197,94,0.12)',   type: 'income'   as ModalType },
-            { label: 'Add Expense',  icon: <TrendingDown size={26} />,  color: 'var(--danger)',  bg: 'rgba(239,68,68,0.12)',   type: 'expense'  as ModalType },
-            { label: 'Transfer',     icon: <ArrowLeftRight size={26} />, color: 'var(--primary)', bg: 'rgba(99,102,241,0.12)',  type: 'transfer' as ModalType },
+            {
+              label: 'Add Income',
+              icon: <TrendingUp size={26} />,
+              color: 'var(--success)',
+              bg: 'rgba(34,197,94,0.12)',
+              type: 'income' as ModalType,
+            },
+            {
+              label: 'Add Expense',
+              icon: <TrendingDown size={26} />,
+              color: 'var(--danger)',
+              bg: 'rgba(239,68,68,0.12)',
+              type: 'expense' as ModalType,
+            },
+            {
+              label: 'Transfer',
+              icon: <ArrowLeftRight size={26} />,
+              color: 'var(--primary)',
+              bg: 'rgba(99,102,241,0.12)',
+              type: 'transfer' as ModalType,
+            },
           ].map((btn) => (
-            <button key={btn.label} type="button" onClick={() => openModal(btn.type)}
+            <button key={btn.label} type="button"
+              onClick={() => openModal(btn.type)}
               style={{
-                background: btn.bg, border: `2px solid ${btn.color}`,
-                borderRadius: 18, padding: '22px 10px', cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                gap: 10, color: btn.color, fontWeight: 900, fontSize: 14,
+                background: btn.bg,
+                border: `2px solid ${btn.color}`,
+                borderRadius: 18, padding: '22px 10px',
+                cursor: 'pointer',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', gap: 10,
+                color: btn.color, fontWeight: 900, fontSize: 14,
               }}>
               {btn.icon}
               {btn.label}
@@ -871,64 +1373,101 @@ export default function Dashboard({ user }: { user: User }) {
         </div>
       </div>
 
-      {/* Recent Transactions */}
+      {/* ── Recent Transactions ── */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between',
-          alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 900, letterSpacing: 0.5 }}>
-            RECENT TRANSACTIONS
-          </div>
+        <div style={{
+          fontSize: 13, color: 'var(--muted)', fontWeight: 900,
+          letterSpacing: 0.5, marginBottom: 12,
+        }}>
+          RECENT TRANSACTIONS
         </div>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 42, color: 'var(--muted)',
-            background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)' }}>
-            <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: 8 }} />
+          <div style={{
+            textAlign: 'center', padding: 42, color: 'var(--muted)',
+            background: 'var(--card)', borderRadius: 18,
+            border: '1px solid var(--border)',
+          }}>
+            <RefreshCw size={24}
+              style={{
+                animation: 'spin 1s linear infinite', marginBottom: 8,
+              }}
+            />
             <div>Loading...</div>
           </div>
         ) : recentTransactions.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)',
-            background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)' }}>
+          <div style={{
+            textAlign: 'center', padding: 48, color: 'var(--muted)',
+            background: 'var(--card)', borderRadius: 18,
+            border: '1px solid var(--border)',
+          }}>
             <DollarSign size={34} style={{ marginBottom: 10, opacity: 0.35 }} />
-            <div style={{ fontWeight: 800, fontSize: 16 }}>No transactions yet</div>
-            <div style={{ fontSize: 13, marginTop: 5 }}>Use the quick actions above!</div>
+            <div style={{ fontWeight: 800, fontSize: 16 }}>
+              No transactions yet
+            </div>
+            <div style={{ fontSize: 13, marginTop: 5 }}>
+              Use the quick actions above!
+            </div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
             {recentTransactions.map((tx) => {
               const color = getTypeColor(tx.type);
-              const sign  = tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : '';
+              const sign  = tx.type === 'income'
+                ? '+' : tx.type === 'expense' ? '-' : '';
+              const display =
+                tx.currency === 'INR'
+                  ? `${sign}₹${formatINR(tx.amount)}`
+                  : `${sign}AED ${formatNumber(tx.amount)}`;
+
               return (
                 <div key={tx.id} style={{
-                  background: 'var(--card)', border: '1px solid var(--border)',
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
                   borderRadius: 17, padding: '14px 16px',
                   display: 'flex', alignItems: 'center',
                   justifyContent: 'space-between', gap: 14,
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    gap: 12, minWidth: 0,
+                  }}>
                     <div style={{
                       width: 42, height: 42, borderRadius: 14,
                       background: `${color}1f`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', flexShrink: 0,
                     }}>
                       {getTypeIcon(tx.type)}
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 900, fontSize: 15,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{
+                        fontWeight: 900, fontSize: 15,
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
                         {tx.type === 'transfer'
                           ? `${getMethodName(tx.fromMethod || '')} → ${getMethodName(tx.toMethod || '')}`
                           : tx.category}
                       </div>
-                      <div style={{ fontSize: 13, color: 'var(--muted)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {tx.type !== 'transfer' && `${getMethodName(tx.paymentMethod)} · `}
-                        {tx.date}
+                      <div style={{
+                        fontSize: 13, color: 'var(--muted)',
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {tx.paymentMethodName
+                          || getMethodName(tx.paymentMethodId || '')}
+                        {' · '}{tx.date}
+                        {tx.note ? ` · ${tx.note}` : ''}
                       </div>
                     </div>
                   </div>
-                  <Money amount={tx.amount || 0} currency={tx.currency}
-                    sign={sign} color={color} size={16} />
+                  <div style={{
+                    fontSize: 16, fontWeight: 900, color,
+                    whiteSpace: 'nowrap', flexShrink: 0,
+                  }}>
+                    {display}
+                  </div>
                 </div>
               );
             })}
@@ -936,33 +1475,49 @@ export default function Dashboard({ user }: { user: User }) {
         )}
       </div>
 
-      {/* Modal */}
+      {/* ── Modal ── */}
       {modal !== 'none' && (
-        <div onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-            backdropFilter: 'blur(4px)', display: 'flex',
-            alignItems: 'flex-end', justifyContent: 'center', zIndex: 1000,
-          }}>
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'flex-end',
+            justifyContent: 'center', zIndex: 1000,
+          }}
+        >
           <div style={{
-            background: 'var(--card)', borderRadius: '26px 26px 0 0',
-            padding: '24px 20px 44px', width: '100%', maxWidth: 520,
+            background: 'var(--card)',
+            borderRadius: '26px 26px 0 0',
+            padding: '24px 20px 44px',
+            width: '100%', maxWidth: 520,
             maxHeight: '92vh', overflowY: 'auto',
             boxShadow: '0 -20px 50px rgba(0,0,0,0.22)',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            {/* Modal header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 20,
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 11,
+              }}>
                 <div style={{
                   width: 40, height: 40, borderRadius: 14,
-                  background: modal === 'income' ? 'rgba(34,197,94,0.15)'
+                  background:
+                    modal === 'income'   ? 'rgba(34,197,94,0.15)'
                     : modal === 'expense' ? 'rgba(239,68,68,0.15)'
                     : 'rgba(99,102,241,0.15)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'center',
                 }}>
-                  {modal === 'income'   && <TrendingUp size={20} color="var(--success)" />}
-                  {modal === 'expense'  && <TrendingDown size={20} color="var(--danger)" />}
-                  {modal === 'transfer' && <ArrowLeftRight size={20} color="var(--primary)" />}
+                  {modal === 'income' &&
+                    <TrendingUp size={20} color="var(--success)" />}
+                  {modal === 'expense' &&
+                    <TrendingDown size={20} color="var(--danger)" />}
+                  {modal === 'transfer' &&
+                    <ArrowLeftRight size={20} color="var(--primary)" />}
                 </div>
                 <div>
                   <div style={{ fontWeight: 900, fontSize: 19 }}>
@@ -971,14 +1526,18 @@ export default function Dashboard({ user }: { user: User }) {
                       : 'Transfer Funds'}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {modal === 'transfer' ? 'Move money between accounts' : `Quick ${modal} entry`}
+                    {modal === 'transfer'
+                      ? 'Move money between accounts'
+                      : `Quick ${modal} entry`}
                   </div>
                 </div>
               </div>
-              <button type="button" onClick={closeModal}
-                style={{ background: 'var(--bg)', border: 'none', borderRadius: 12,
-                  padding: 9, cursor: 'pointer', color: 'var(--text)',
-                  display: 'flex', alignItems: 'center' }}>
+              <button type="button" onClick={closeModal} style={{
+                background: 'var(--bg)', border: 'none',
+                borderRadius: 12, padding: 9,
+                cursor: 'pointer', color: 'var(--text)',
+                display: 'flex', alignItems: 'center',
+              }}>
                 <X size={20} />
               </button>
             </div>
@@ -986,18 +1545,25 @@ export default function Dashboard({ user }: { user: User }) {
             {renderModalContent()}
 
             <button type="button"
-              onClick={modal === 'income' ? saveIncome : modal === 'expense' ? saveExpense : saveTransfer}
+              onClick={
+                modal === 'income'  ? saveIncome
+                : modal === 'expense' ? saveExpense
+                : saveTransfer
+              }
               disabled={saving}
               style={{
                 width: '100%', marginTop: 20, padding: '15px',
                 borderRadius: 15, border: 'none',
                 cursor: saving ? 'not-allowed' : 'pointer',
-                background: modal === 'income' ? 'var(--success)'
-                  : modal === 'expense' ? 'var(--danger)' : 'var(--primary)',
-                color: '#fff', fontWeight: 900, fontSize: 16, opacity: saving ? 0.7 : 1,
+                background:
+                  modal === 'income'   ? 'var(--success)'
+                  : modal === 'expense' ? 'var(--danger)'
+                  : 'var(--primary)',
+                color: '#fff', fontWeight: 900, fontSize: 16,
+                opacity: saving ? 0.7 : 1,
               }}>
               {saving ? 'Saving...'
-                : modal === 'income' ? 'Save Income'
+                : modal === 'income'  ? 'Save Income'
                 : modal === 'expense' ? 'Save Expense'
                 : 'Confirm Transfer'}
             </button>
@@ -1010,83 +1576,7 @@ export default function Dashboard({ user }: { user: User }) {
           from { transform: rotate(0deg); }
           to   { transform: rotate(360deg); }
         }
-        @media (max-width: 600px) {
-          .grid-3 { grid-template-columns: 1fr !important; }
-        }
       `}</style>
-    </div>
-  );
-}
-
-// ── Helper sub-components (outside main to avoid re-creation) ─────────────────
-
-function SummaryCard({ label, value, currency, color, icon }: {
-  label: string; value: number; currency: 'AED' | 'INR';
-  color: string; icon: React.ReactNode;
-}) {
-  const display = currency === 'INR'
-    ? Math.abs(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })
-    : Math.abs(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
-
-  return (
-    <div style={{
-      background: 'var(--card)', borderRadius: 16, padding: '16px 14px',
-      border: '1px solid var(--border)', minHeight: 100,
-      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-    }}>
-      <div style={{ color }}>{icon}</div>
-      <div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
-        <div style={{ fontSize: 16, fontWeight: 900, color }}>
-          {value < 0 ? '-' : ''}{currency === 'INR' ? '₹' : 'AED '}{display}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BalanceRow({ icon, label, sublabel, balance, currency, color, isLast = false }: {
-  icon: string; label: string; sublabel: string;
-  balance: number; currency: 'AED' | 'INR';
-  color: string; isLast?: boolean;
-}) {
-  const isPositive = balance >= 0;
-  const display    = currency === 'INR'
-    ? Math.abs(balance).toLocaleString('en-IN', { maximumFractionDigits: 0 })
-    : Math.abs(balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 16px',
-      borderBottom: isLast ? 'none' : '1px solid var(--border)',
-    }}>
-      <div style={{
-        width: 36, height: 36, borderRadius: 10,
-        background: color + '18',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 18, flexShrink: 0,
-      }}>
-        {icon}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {label}
-        </div>
-        {sublabel && (
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-            {sublabel}
-          </div>
-        )}
-      </div>
-      <div style={{
-        fontSize: 14, fontWeight: 900,
-        color: isPositive ? color : 'var(--danger)',
-        whiteSpace: 'nowrap',
-      }}>
-        {balance < 0 ? '-' : ''}{currency === 'INR' ? '₹' : 'AED '}{display}
-      </div>
     </div>
   );
 }
