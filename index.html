@@ -3,64 +3,42 @@
   <head>
     <meta charset="UTF-8" />
     
-    <!-- Viewport — Critical for mobile -->
     <meta 
       name="viewport" 
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
     />
     
-    <!-- ================================================ -->
-    <!-- PWA Core -->
-    <!-- ================================================ -->
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="manifest" href="/manifest.json" />
     
-    <!-- theme-color MUST match manifest theme_color exactly -->
-    <meta name="theme-color" content="#1a1f2e" />
+    <meta name="theme-color" content="#0f1219" />
     
-    <!-- ================================================ -->
-    <!-- iOS PWA — Critical for iPhone/iPad -->
-    <!-- ================================================ -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Finance Pro" />
     
-    <!-- iOS Icons -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
-    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icon-512.png" />
     
-    <!-- ================================================ -->
-    <!-- Android / General -->
-    <!-- ================================================ -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="application-name" content="Finance Pro" />
-    <meta name="msapplication-TileColor" content="#1a1f2e" />
-    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png" />
+    <meta name="msapplication-TileColor" content="#0f1219" />
+    <meta name="msapplication-TileImage" content="/icon-192.png" />
     
-    <!-- ================================================ -->
-    <!-- SEO & Social -->
-    <!-- ================================================ -->
     <meta name="description" content="Personal Finance Tracker for UAE & India Expats" />
     <meta name="keywords" content="finance, expense tracker, UAE, India, expat, budget" />
     <meta name="author" content="My Finance Pro" />
     
-    <!-- Open Graph -->
     <meta property="og:title" content="My Finance Pro" />
     <meta property="og:description" content="Personal Finance Tracker for Expats" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://my-finance-pro-phi.vercel.app" />
-    <meta property="og:image" content="/icons/icon-512x512.png" />
+    <meta property="og:image" content="/icon-512.png" />
     
-    <!-- ================================================ -->
-    <!-- Favicons -->
-    <!-- ================================================ -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
-    <link rel="shortcut icon" href="/icons/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icon-192.png" />
+    <link rel="shortcut icon" href="/icon-192.png" />
     
-    <!-- ================================================ -->
-    <!-- Performance -->
-    <!-- ================================================ -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="dns-prefetch" href="https://firestore.googleapis.com" />
@@ -68,14 +46,11 @@
     
     <title>My Finance Pro</title>
     
-    <!-- ================================================ -->
-    <!-- Critical CSS — No flash on load -->
-    <!-- ================================================ -->
     <style>
       html, body, #root {
         margin: 0;
         padding: 0;
-        background-color: #1a1f2e;
+        background-color: #0f1219;
         min-height: 100%;
         min-height: 100dvh;
         overflow-x: hidden;
@@ -95,7 +70,7 @@
       #initial-loader {
         position: fixed;
         inset: 0;
-        background: #1a1f2e;
+        background: #0f1219;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -178,7 +153,6 @@
   
   <body class="no-select">
     
-    <!-- Initial loader -->
     <div id="initial-loader">
       <div class="logo">💰</div>
       <p class="app-name">My Finance Pro</p>
@@ -186,15 +160,10 @@
       <div class="spinner"></div>
     </div>
     
-    <!-- React App Root -->
     <div id="root"></div>
     
-    <!-- React entry -->
     <script type="module" src="/src/main.tsx"></script>
     
-    <!-- ================================================ -->
-    <!-- PWA Detection + iOS Auth Fix -->
-    <!-- ================================================ -->
     <script>
       // IndexedDB warm-up — prevents Firebase Auth logout on iOS
       (function() {
@@ -213,7 +182,6 @@
       console.log('[App] PWA:', window.isPWA, '| iOS:', window.isIOS, '| Android:', window.isAndroid);
       
       // Android: Listen for beforeinstallprompt
-      // Store it for manual trigger if needed
       window.addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
         window._installPrompt = e;
