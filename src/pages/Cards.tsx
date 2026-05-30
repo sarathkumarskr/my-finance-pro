@@ -1,13 +1,19 @@
 // Cards.tsx
+
 import { useEffect, useState } from 'react';
+
 import type { User } from 'firebase/auth';
+
 import {
   addDoc, collection, deleteDoc, doc,
   onSnapshot, query, Timestamp,
   updateDoc, where,
 } from 'firebase/firestore';
+
 import { db } from '../firebaseConfig';
+
 import { toast } from 'react-hot-toast';
+
 import {
   Plus, Pencil, Trash2, X, ChevronDown, ChevronUp,
   CreditCard, Wallet, Building2, Smartphone,
@@ -17,7 +23,9 @@ import {
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type CardType = 'credit' | 'debit' | 'cash' | 'upi' | 'tabby' | 'custom';
+
 type Country  = 'UAE' | 'India' | 'Both';
+
 type ConversionType =
   | 'zero_interest'
   | 'reducing_balance'
@@ -129,6 +137,7 @@ const UAE_BANKS = [
   'ENBD','FAB','ADCB','Mashreq','DIB',
   'CBD','RAK Bank','HSBC UAE','Citibank UAE','Other',
 ];
+
 const INDIA_BANKS = [
   'SBI','HDFC','ICICI','Axis','Kotak',
   'PNB','BOB','Canara','IndusInd','Federal','Other',
@@ -142,6 +151,7 @@ const inputStyle: React.CSSProperties = {
   color: 'var(--text)', fontSize: 14, outline: 'none',
   boxSizing: 'border-box',
 };
+
 const labelStyle: React.CSSProperties = {
   fontSize: 12, color: 'var(--muted)', marginBottom: 6,
   display: 'block', fontWeight: 600,
@@ -223,19 +233,24 @@ function fmtAED(n: number) {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;
 }
+
 function fmtINR(n: number) {
   return `₹${Math.abs(n).toLocaleString('en-IN', {
     maximumFractionDigits: 0,
   })}`;
 }
+
 function fmt(n: number, country: string) {
   return country === 'India' ? fmtINR(n) : fmtAED(n);
 }
+
 function pad2(n: number) { return String(n).padStart(2, '0'); }
+
 function getCurrentMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
+
 function getDaysLeft(day: number): number {
   const now = new Date();
   let   due = new Date(now.getFullYear(), now.getMonth(), day);
@@ -875,7 +890,7 @@ function EMIForm({
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function Cards({ user }: { user: User }) {
-  const [methods,      setMethods]      = useState<PaymentMethod[]>([]);
+  const [methods,       setMethods]       = useState<PaymentMethod[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [openingBal,   setOpeningBal]   = useState<OpeningBalance | null>(null);
   const [expanded,     setExpanded]     = useState<Record<string, boolean>>({});
@@ -1104,6 +1119,11 @@ export default function Cards({ user }: { user: User }) {
       (s, e) => s + e.monthlyAmount, 0
     );
 
+    // ✅ PATCH: Progress bar logic specifically added inside Credit Card render logic
+    const usedAmount = isCredit ? (balance < 0 ? Math.abs(balance) : balance) : 0;
+    const currentAvailable = Math.max(0, limit - usedAmount);
+    const utilization = limit > 0 ? Math.min((usedAmount / limit) * 100, 100) : 0;
+
     return (
       <div key={pm.id} style={{
         background: 'var(--bg)',
@@ -1147,20 +1167,15 @@ export default function Cards({ user }: { user: User }) {
             </div>
           </div>
 
+          {/* ✅ PATCH: If Credit Card, display differently on the header */}
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             {isCredit ? (
-              <>
-                <div style={{
-                  fontSize: 14, fontWeight: 900,
-                  color: balance > limit * 0.8
-                    ? 'var(--danger)' : 'var(--warning)',
-                }}>
-                  {fmt(balance, country)} used
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  of {fmt(limit, country)}
-                </div>
-              </>
+               <div style={{
+                 fontSize: 14, fontWeight: 900,
+                 color: 'var(--text)', // Cleaned up for the header 
+               }}>
+                 {/* Empty - details moved to the progress bar block */}
+               </div>
             ) : (
               <div style={{
                 fontSize: 14, fontWeight: 900,
@@ -1179,10 +1194,24 @@ export default function Cards({ user }: { user: User }) {
           </div>
         </div>
 
-        {/* Utilization — credit always visible */}
+        {/* ✅ PATCH: Progress bar — Credit Card Only */}
         {isCredit && limit > 0 && (
-          <div style={{ padding: '0 16px 10px' }}>
-            <UtilizationBar used={balance} limit={limit} />
+          <div style={{ padding: '0 16px 12px', background: 'var(--bg)' }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
+                <span style={{ color: 'var(--muted)' }}>Limit: <strong>{fmt(limit, country)}</strong></span>
+                <span style={{ color: 'var(--muted)' }}>Avail: <strong style={{ color: 'var(--success)' }}>{fmt(currentAvailable, country)}</strong></span>
+              </div>
+              <div style={{ width: '100%', height: 6, background: 'var(--border)', borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
+                <div style={{ 
+                  height: '100%', width: `${utilization}%`, 
+                  background: utilization > 85 ? 'var(--danger)' : utilization > 60 ? 'var(--warning)' : 'var(--primary)',
+                  borderRadius: 4
+                }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
+                <span>Used: {fmt(usedAmount, country)}</span>
+                {balance < 0 && <span style={{ color: 'var(--success)' }}>Overpaid: {fmt(Math.abs(balance), country)}</span>}
+              </div>
           </div>
         )}
 
@@ -1612,6 +1641,7 @@ export default function Cards({ user }: { user: User }) {
                     );
                   })}
                 </div>
+                {editTarget && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>Type cannot be changed after creation.</div>}
               </div>
 
               {/* Country */}

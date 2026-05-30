@@ -1,4 +1,3 @@
-// Dashboard.tsx
 import { useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
@@ -57,6 +56,7 @@ interface PaymentMethod {
   bankName?: string;
   isCashDefault?: boolean;
   creditLimit?: number;
+  emis?: { outstandingPrincipal: number }[];
 }
 
 interface OpeningBalance {
@@ -95,7 +95,7 @@ const EXPENSE_CATEGORIES = [
   'Education', 'Entertainment', 'Utilities', 'Other',
 ];
 
-const AED_TO_INR = 22.8; // approximate rate for net worth display
+const AED_TO_INR = 22.8;
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -211,7 +211,6 @@ function SummaryCard({
   );
 }
 
-// ✅ UPDATED: BalanceRow handles both standard cards and Credit Cards with Progress Bar
 function BalanceRow({
   pm, balance, isLast = false,
 }: {
@@ -230,10 +229,9 @@ function BalanceRow({
         minimumFractionDigits: 2, maximumFractionDigits: 2,
       });
 
-  // Credit Card View
   if (isCredit) {
     const limit = pm.creditLimit || 0;
-    const usedAmount = balance < 0 ? Math.abs(balance) : 0;
+    const usedAmount = balance < 0 ? Math.abs(balance) : 0; 
     const available = Math.max(0, limit - usedAmount);
     const utilization = limit > 0 ? Math.min((usedAmount / limit) * 100, 100) : 0;
 
@@ -256,15 +254,10 @@ function BalanceRow({
           </div>
         </div>
 
-        {/* Credit Card Progress Bar inside Dashboard */}
         <div style={{ background: 'var(--bg)', borderRadius: 10, padding: 10, border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
-            <span style={{ color: 'var(--muted)' }}>
-              Limit: <strong>{currency === 'INR' ? '₹' : 'AED '}{limit.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong>
-            </span>
-            <span style={{ color: 'var(--muted)' }}>
-              Avail: <strong style={{ color: 'var(--success)' }}>{currency === 'INR' ? '₹' : 'AED '}{available.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong>
-            </span>
+            <span style={{ color: 'var(--muted)' }}>Limit: <strong>{currency === 'INR' ? '₹' : 'AED '}{limit.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong></span>
+            <span style={{ color: 'var(--muted)' }}>Avail: <strong style={{ color: 'var(--success)' }}>{currency === 'INR' ? '₹' : 'AED '}{available.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong></span>
           </div>
           <div style={{ width: '100%', height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
             <div style={{ 
@@ -282,18 +275,14 @@ function BalanceRow({
     );
   }
 
-  // Standard non-credit card view
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 16px',
+      display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
       borderBottom: isLast ? 'none' : '1px solid var(--border)',
     }}>
       <div style={{
-        width: 36, height: 36, borderRadius: 10,
-        background: color + '18',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 18, flexShrink: 0,
+        width: 36, height: 36, borderRadius: 10, background: color + '18',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0,
       }}>
         {icon}
       </div>
@@ -311,9 +300,7 @@ function BalanceRow({
         )}
       </div>
       <div style={{
-        fontSize: 14, fontWeight: 900,
-        color: balance >= 0 ? color : 'var(--danger)',
-        whiteSpace: 'nowrap',
+        fontSize: 14, fontWeight: 900, color: balance >= 0 ? color : 'var(--danger)', whiteSpace: 'nowrap',
       }}>
         {balance < 0 ? '-' : ''}{currency === 'INR' ? '₹' : 'AED '}{display}
       </div>
@@ -371,7 +358,7 @@ export default function Dashboard({ user }: { user: User }) {
       (snap) => {
         setPaymentMethods(
           snap.docs
-            .map((d) => ({ id: d.id, ...d.data() } as PaymentMethod))
+            .map((d) => ({ id: d.id, ...d.data(), emis: d.data().emis } as PaymentMethod))
             .filter((pm) => pm.id)
         );
       }
@@ -424,28 +411,31 @@ export default function Dashboard({ user }: { user: User }) {
 
   // ── Balance Calculation ─────────────────────────────────────────────────────
 
-  // ✅ Per-method balance: opening + income - expense (from asOf date)
+  // ✅ PATCH: Pure Accounting Principle Logic (Date filtering removed)
   const getMethodCurrentBalance = (pmId: string): number => {
+    const pm = paymentMethods.find((m) => m.id === pmId);
     const opening = openingBal?.perMethod?.[pmId] ?? 0;
-    const asOf    = openingBal?.asOf ?? '1970-01-01';
 
-    return transactions
-      .filter((tx) => tx.date >= asOf)
-      .reduce((sum, tx) => {
-        if (tx.type === 'income'  && tx.paymentMethodId === pmId)
-          return sum + (tx.amount ?? 0);
-        if (tx.type === 'expense' && tx.paymentMethodId === pmId)
-          return sum - (tx.amount ?? 0);
-        if (tx.type === 'transfer') {
-          if (tx.fromMethod === pmId) return sum - (tx.amount ?? 0);
-          if (tx.toMethod   === pmId) return sum + (tx.amount ?? 0);
-        }
-        return sum;
-      }, opening);
+    const txBal = transactions.reduce((sum, tx) => {
+      if (tx.type === 'income'  && tx.paymentMethodId === pmId)
+        return sum + (tx.amount ?? 0);
+      if (tx.type === 'expense' && tx.paymentMethodId === pmId)
+        return sum - (tx.amount ?? 0);
+      if (tx.type === 'transfer') {
+        if (tx.fromMethod === pmId) return sum - (tx.amount ?? 0);
+        if (tx.toMethod   === pmId) return sum + (tx.amount ?? 0);
+      }
+      return sum;
+    }, opening);
+      
+    if (pm?.type === 'credit' && pm.emis) {
+      const emiUsed = pm.emis.reduce((s, e) => s + (e.outstandingPrincipal || 0), 0);
+      return txBal - emiUsed;
+    }
+    
+    return txBal;
   };
 
-  // ✅ FIX: Separate UAE-only and India-only methods to avoid double counting
-  // 'Both' country methods are counted in UAE (AED) only
   const uaeOnlyMethods = paymentMethods.filter(
     (pm) => pm.country === 'UAE' || pm.country === 'Both'
   );
@@ -453,15 +443,13 @@ export default function Dashboard({ user }: { user: User }) {
     (pm) => pm.country === 'India'
   );
 
-  // ✅ FIX: uaeCash + indiaCash are tracked via isCashDefault methods now
-  // Total = sum of all method balances (cash methods include cash balance)
-  const totalUAEBalance = openingBal
+  const totalUAEBalance = paymentMethods.length > 0
     ? uaeOnlyMethods.reduce(
         (sum, pm) => sum + getMethodCurrentBalance(pm.id), 0
       )
     : 0;
 
-  const totalIndiaBalance = openingBal
+  const totalIndiaBalance = paymentMethods.length > 0
     ? indiaOnlyMethods.reduce(
         (sum, pm) => sum + getMethodCurrentBalance(pm.id), 0
       )
@@ -469,7 +457,6 @@ export default function Dashboard({ user }: { user: User }) {
 
   // ── Net Worth Calculation ───────────────────────────────────────────────────
 
-  // Convert everything to AED for net worth
   const savingsAED = savingGoals
     .filter((g) => g.currency === 'AED')
     .reduce((s, g) => s + (g.currentAmount ?? 0), 0);
@@ -494,7 +481,6 @@ export default function Dashboard({ user }: { user: User }) {
     .filter((d) => d.type === 'i_owe' && d.currency === 'INR')
     .reduce((s, d) => s + (d.remainingAmount ?? 0), 0);
 
-  // Total assets in AED (INR converted)
   const totalAssetsAED =
     totalUAEBalance +
     (totalIndiaBalance / AED_TO_INR) +
@@ -555,7 +541,6 @@ export default function Dashboard({ user }: { user: User }) {
     return paymentMethods.find((m) => m.id === id)?.name || id;
   };
 
-  // Filter methods by currency for modal
   const aedMethods = paymentMethods.filter(
     (pm) => pm.country === 'UAE' || pm.country === 'Both'
   );
@@ -653,8 +638,6 @@ export default function Dashboard({ user }: { user: User }) {
     }
   };
 
-  // ── UI helpers ──────────────────────────────────────────────────────────────
-
   const getTypeColor = (type: string) => {
     if (type === 'income')  return 'var(--success)';
     if (type === 'expense') return 'var(--danger)';
@@ -665,8 +648,6 @@ export default function Dashboard({ user }: { user: User }) {
     if (type === 'expense') return <TrendingDown size={17} color="var(--danger)"  />;
     return <ArrowLeftRight size={17} color="var(--primary)" />;
   };
-
-  // ── Modal sub-components ────────────────────────────────────────────────────
 
   const CurrencyToggle = () => (
     <div style={{ gridColumn: '1/-1' }}>
@@ -887,8 +868,6 @@ export default function Dashboard({ user }: { user: User }) {
     );
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-
   return (
     <div style={{ padding: '22px 16px 40px', maxWidth: 900, margin: '0 auto' }}>
 
@@ -908,361 +887,324 @@ export default function Dashboard({ user }: { user: User }) {
       </div>
 
       {/* ── Current Balance Widget ── */}
-      {openingBal ? (
-        <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{
+          fontSize: 12, color: 'var(--muted)', fontWeight: 900,
+          letterSpacing: 0.5, marginBottom: 10,
+        }}>
+          💰 CURRENT BALANCE
+        </div>
+
+        {/* UAE + India totals */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: 12, marginBottom: 12,
+        }}>
+          {/* UAE Total */}
           <div style={{
-            fontSize: 12, color: 'var(--muted)', fontWeight: 900,
-            letterSpacing: 0.5, marginBottom: 10,
+            background:
+              'linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05))',
+            border: '1px solid rgba(16,185,129,0.3)',
+            borderRadius: 20, padding: '18px 16px',
           }}>
-            💰 CURRENT BALANCE
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              gap: 8, marginBottom: 10,
+            }}>
+              <span style={{ fontSize: 20 }}>🇦🇪</span>
+              <span style={{
+                fontSize: 12, color: 'var(--muted)', fontWeight: 700,
+              }}>
+                UAE Total
+              </span>
+            </div>
+            <div style={{
+              fontSize: 22, fontWeight: 900,
+              color: totalUAEBalance >= 0
+                ? 'var(--success)' : 'var(--danger)',
+            }}>
+              {totalUAEBalance < 0 ? '-' : ''}
+              AED {formatNumber(totalUAEBalance)}
+            </div>
           </div>
 
-          {/* UAE + India totals */}
+          {/* India Total */}
           <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr',
-            gap: 12, marginBottom: 12,
+            background:
+              'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05))',
+            border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 20, padding: '18px 16px',
           }}>
-            {/* UAE Total */}
             <div style={{
-              background:
-                'linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05))',
-              border: '1px solid rgba(16,185,129,0.3)',
-              borderRadius: 20, padding: '18px 16px',
+              display: 'flex', alignItems: 'center',
+              gap: 8, marginBottom: 10,
+            }}>
+              <span style={{ fontSize: 20 }}>🇮🇳</span>
+              <span style={{
+                fontSize: 12, color: 'var(--muted)', fontWeight: 700,
+              }}>
+                India Total
+              </span>
+            </div>
+            <div style={{
+              fontSize: 22, fontWeight: 900,
+              color: totalIndiaBalance >= 0
+                ? 'var(--warning)' : 'var(--danger)',
+            }}>
+              {totalIndiaBalance < 0 ? '-' : ''}
+              ₹{formatINR(totalIndiaBalance)}
+            </div>
+          </div>
+        </div>
+
+        {/* Per-method breakdown */}
+        <div style={{
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 18, overflow: 'hidden', marginBottom: 12,
+        }}>
+          {/* UAE section */}
+          <div style={{
+            padding: '8px 16px',
+            background: 'rgba(16,185,129,0.05)',
+            borderBottom: '1px solid var(--border)',
+            fontSize: 11, fontWeight: 800,
+            color: 'var(--success)', letterSpacing: 0.5,
+          }}>
+            🇦🇪 UAE ACCOUNTS
+          </div>
+
+          {uaeOnlyMethods.length === 0 ? (
+            <div style={{
+              padding: '12px 16px', fontSize: 13, color: 'var(--muted)',
+            }}>
+              No UAE payment methods
+            </div>
+          ) : (
+            uaeOnlyMethods.map((pm, i) => (
+              <BalanceRow
+                key={pm.id}
+                pm={pm}
+                balance={getMethodCurrentBalance(pm.id)}
+                isLast={i === uaeOnlyMethods.length - 1}
+              />
+            ))
+          )}
+
+          {/* India section */}
+          <div style={{
+            padding: '8px 16px',
+            background: 'rgba(245,158,11,0.05)',
+            borderTop: '1px solid var(--border)',
+            borderBottom: indiaOnlyMethods.length > 0
+              ? '1px solid var(--border)' : 'none',
+            fontSize: 11, fontWeight: 800,
+            color: 'var(--warning)', letterSpacing: 0.5,
+          }}>
+            🇮🇳 INDIA ACCOUNTS
+          </div>
+
+          {indiaOnlyMethods.length === 0 ? (
+            <div style={{
+              padding: '12px 16px', fontSize: 13, color: 'var(--muted)',
+            }}>
+              No India payment methods
+            </div>
+          ) : (
+            indiaOnlyMethods.map((pm, i) => (
+              <BalanceRow
+                key={pm.id}
+                pm={pm}
+                balance={getMethodCurrentBalance(pm.id)}
+                isLast={i === indiaOnlyMethods.length - 1}
+              />
+            ))
+          )}
+        </div>
+
+        {/* ── Net Worth Widget ── */}
+        <div style={{
+          background: 'var(--card)',
+          border: `1px solid ${netWorthAED >= 0
+            ? 'rgba(99,102,241,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          borderRadius: 20, padding: '18px 16px',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', marginBottom: 16,
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 10,
+                background: 'rgba(99,102,241,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <NetWorthIcon size={18} color="var(--primary)" />
+              </div>
+              <div>
+                <div style={{
+                  fontSize: 13, fontWeight: 800, color: 'var(--text)',
+                }}>
+                  Net Worth
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                  INR converted @ {AED_TO_INR} per AED
+                </div>
+              </div>
+            </div>
+            <div style={{
+              fontSize: 22, fontWeight: 900,
+              color: netWorthAED >= 0 ? 'var(--primary)' : 'var(--danger)',
+            }}>
+              {netWorthAED < 0 ? '-' : ''}
+              AED {formatNumber(netWorthAED)}
+            </div>
+          </div>
+
+          {/* Breakdown rows */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* UAE Balance */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', fontSize: 13,
             }}>
               <div style={{
                 display: 'flex', alignItems: 'center',
-                gap: 8, marginBottom: 10,
+                gap: 8, color: 'var(--muted)',
               }}>
-                <span style={{ fontSize: 20 }}>🇦🇪</span>
-                <span style={{
-                  fontSize: 12, color: 'var(--muted)', fontWeight: 700,
-                }}>
-                  UAE Total
-                </span>
+                <Wallet size={14} color="var(--success)" />
+                🇦🇪 UAE Accounts
               </div>
-              <div style={{
-                fontSize: 22, fontWeight: 900,
+              <span style={{
+                fontWeight: 700,
                 color: totalUAEBalance >= 0
                   ? 'var(--success)' : 'var(--danger)',
               }}>
-                {totalUAEBalance < 0 ? '-' : ''}
-                AED {formatNumber(totalUAEBalance)}
-              </div>
-              <div style={{
-                fontSize: 11, color: 'var(--muted)', marginTop: 4,
-              }}>
-                since {openingBal.asOf}
-              </div>
+                + AED {formatNumber(totalUAEBalance)}
+              </span>
             </div>
 
-            {/* India Total */}
+            {/* India Balance */}
             <div style={{
-              background:
-                'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05))',
-              border: '1px solid rgba(245,158,11,0.3)',
-              borderRadius: 20, padding: '18px 16px',
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', fontSize: 13,
             }}>
               <div style={{
                 display: 'flex', alignItems: 'center',
-                gap: 8, marginBottom: 10,
+                gap: 8, color: 'var(--muted)',
               }}>
-                <span style={{ fontSize: 20 }}>🇮🇳</span>
-                <span style={{
-                  fontSize: 12, color: 'var(--muted)', fontWeight: 700,
-                }}>
-                  India Total
-                </span>
+                <Wallet size={14} color="var(--warning)" />
+                🇮🇳 India Accounts
               </div>
-              <div style={{
-                fontSize: 22, fontWeight: 900,
+              <span style={{
+                fontWeight: 700,
                 color: totalIndiaBalance >= 0
-                  ? 'var(--warning)' : 'var(--danger)',
+                  ? 'var(--success)' : 'var(--danger)',
               }}>
-                {totalIndiaBalance < 0 ? '-' : ''}
-                ₹{formatINR(totalIndiaBalance)}
-              </div>
-              <div style={{
-                fontSize: 11, color: 'var(--muted)', marginTop: 4,
-              }}>
-                since {openingBal.asOf}
-              </div>
-            </div>
-          </div>
-
-          {/* Per-method breakdown */}
-          <div style={{
-            background: 'var(--card)', border: '1px solid var(--border)',
-            borderRadius: 18, overflow: 'hidden', marginBottom: 12,
-          }}>
-            {/* UAE section */}
-            <div style={{
-              padding: '8px 16px',
-              background: 'rgba(16,185,129,0.05)',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 11, fontWeight: 800,
-              color: 'var(--success)', letterSpacing: 0.5,
-            }}>
-              🇦🇪 UAE ACCOUNTS
+                + ₹{formatINR(totalIndiaBalance)}
+                <span style={{
+                  fontSize: 10, color: 'var(--muted)',
+                  marginLeft: 4, fontWeight: 600,
+                }}>
+                  (≈ AED {formatNumber(totalIndiaBalance / AED_TO_INR)})
+                </span>
+              </span>
             </div>
 
-            {uaeOnlyMethods.length === 0 ? (
+            {/* Savings Goals */}
+            {(savingsAED > 0 || savingsINR > 0) && (
               <div style={{
-                padding: '12px 16px', fontSize: 13, color: 'var(--muted)',
-              }}>
-                No UAE payment methods
-              </div>
-            ) : (
-              uaeOnlyMethods.map((pm, i) => (
-                <BalanceRow
-                  key={pm.id}
-                  pm={pm}
-                  balance={getMethodCurrentBalance(pm.id)}
-                  isLast={i === uaeOnlyMethods.length - 1}
-                />
-              ))
-            )}
-
-            {/* India section */}
-            <div style={{
-              padding: '8px 16px',
-              background: 'rgba(245,158,11,0.05)',
-              borderTop: '1px solid var(--border)',
-              borderBottom: indiaOnlyMethods.length > 0
-                ? '1px solid var(--border)' : 'none',
-              fontSize: 11, fontWeight: 800,
-              color: 'var(--warning)', letterSpacing: 0.5,
-            }}>
-              🇮🇳 INDIA ACCOUNTS
-            </div>
-
-            {indiaOnlyMethods.length === 0 ? (
-              <div style={{
-                padding: '12px 16px', fontSize: 13, color: 'var(--muted)',
-              }}>
-                No India payment methods
-              </div>
-            ) : (
-              indiaOnlyMethods.map((pm, i) => (
-                <BalanceRow
-                  key={pm.id}
-                  pm={pm}
-                  balance={getMethodCurrentBalance(pm.id)}
-                  isLast={i === indiaOnlyMethods.length - 1}
-                />
-              ))
-            )}
-          </div>
-
-          {/* ── Net Worth Widget ── */}
-          <div style={{
-            background: 'var(--card)',
-            border: `1px solid ${netWorthAED >= 0
-              ? 'rgba(99,102,241,0.3)' : 'rgba(239,68,68,0.3)'}`,
-            borderRadius: 20, padding: '18px 16px',
-          }}>
-            {/* Header */}
-            <div style={{
-              display: 'flex', alignItems: 'center',
-              justifyContent: 'space-between', marginBottom: 16,
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', fontSize: 13,
               }}>
                 <div style={{
-                  width: 32, height: 32, borderRadius: 10,
-                  background: 'rgba(99,102,241,0.15)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  display: 'flex', alignItems: 'center',
+                  gap: 8, color: 'var(--muted)',
                 }}>
-                  <NetWorthIcon size={18} color="var(--primary)" />
+                  <Target size={14} color="var(--primary)" />
+                  Savings Goals
                 </div>
-                <div>
-                  <div style={{
-                    fontSize: 13, fontWeight: 800, color: 'var(--text)',
-                  }}>
-                    Net Worth
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                    INR converted @ {AED_TO_INR} per AED
-                  </div>
-                </div>
+                <span style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                  {savingsAED > 0 && `+ AED ${formatNumber(savingsAED)}`}
+                  {savingsAED > 0 && savingsINR > 0 && ' · '}
+                  {savingsINR > 0 && `+ ₹${formatINR(savingsINR)}`}
+                </span>
               </div>
+            )}
+
+            {/* Receivables */}
+            {(receivablesAED > 0 || receivablesINR > 0) && (
               <div style={{
-                fontSize: 22, fontWeight: 900,
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', fontSize: 13,
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center',
+                  gap: 8, color: 'var(--muted)',
+                }}>
+                  <CreditCard size={14} color="var(--success)" />
+                  Owed to Me
+                </div>
+                <span style={{ fontWeight: 700, color: 'var(--success)' }}>
+                  {receivablesAED > 0 && `+ AED ${formatNumber(receivablesAED)}`}
+                  {receivablesAED > 0 && receivablesINR > 0 && ' · '}
+                  {receivablesINR > 0 && `+ ₹${formatINR(receivablesINR)}`}
+                </span>
+              </div>
+            )}
+
+            {/* Liabilities */}
+            {(liabilitiesAED > 0 || liabilitiesINR > 0) && (
+              <>
+                <div style={{
+                  height: 1, background: 'var(--border)', margin: '4px 0',
+                }} />
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', fontSize: 13,
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    gap: 8, color: 'var(--muted)',
+                  }}>
+                    <CreditCard size={14} color="var(--danger)" />
+                    I Owe
+                  </div>
+                  <span style={{ fontWeight: 700, color: 'var(--danger)' }}>
+                    {liabilitiesAED > 0 && `- AED ${formatNumber(liabilitiesAED)}`}
+                    {liabilitiesAED > 0 && liabilitiesINR > 0 && ' · '}
+                    {liabilitiesINR > 0 && `- ₹${formatINR(liabilitiesINR)}`}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {/* Net Worth total divider */}
+            <div style={{
+              height: 1, background: 'var(--border)', margin: '4px 0',
+            }} />
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center',
+            }}>
+              <span style={{
+                fontSize: 13, fontWeight: 800, color: 'var(--text)',
+              }}>
+                Total Net Worth
+              </span>
+              <span style={{
+                fontSize: 16, fontWeight: 900,
                 color: netWorthAED >= 0 ? 'var(--primary)' : 'var(--danger)',
               }}>
                 {netWorthAED < 0 ? '-' : ''}
                 AED {formatNumber(netWorthAED)}
-              </div>
-            </div>
-
-            {/* Breakdown rows */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* UAE Balance */}
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', fontSize: 13,
-              }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center',
-                  gap: 8, color: 'var(--muted)',
-                }}>
-                  <Wallet size={14} color="var(--success)" />
-                  🇦🇪 UAE Accounts
-                </div>
-                <span style={{
-                  fontWeight: 700,
-                  color: totalUAEBalance >= 0
-                    ? 'var(--success)' : 'var(--danger)',
-                }}>
-                  + AED {formatNumber(totalUAEBalance)}
-                </span>
-              </div>
-
-              {/* India Balance */}
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', fontSize: 13,
-              }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center',
-                  gap: 8, color: 'var(--muted)',
-                }}>
-                  <Wallet size={14} color="var(--warning)" />
-                  🇮🇳 India Accounts
-                </div>
-                <span style={{
-                  fontWeight: 700,
-                  color: totalIndiaBalance >= 0
-                    ? 'var(--success)' : 'var(--danger)',
-                }}>
-                  + ₹{formatINR(totalIndiaBalance)}
-                  <span style={{
-                    fontSize: 10, color: 'var(--muted)',
-                    marginLeft: 4, fontWeight: 600,
-                  }}>
-                    (≈ AED {formatNumber(totalIndiaBalance / AED_TO_INR)})
-                  </span>
-                </span>
-              </div>
-
-              {/* Savings Goals */}
-              {(savingsAED > 0 || savingsINR > 0) && (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  alignItems: 'center', fontSize: 13,
-                }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center',
-                    gap: 8, color: 'var(--muted)',
-                  }}>
-                    <Target size={14} color="var(--primary)" />
-                    Savings Goals
-                  </div>
-                  <span style={{ fontWeight: 700, color: 'var(--primary)' }}>
-                    {savingsAED > 0 && `+ AED ${formatNumber(savingsAED)}`}
-                    {savingsAED > 0 && savingsINR > 0 && ' · '}
-                    {savingsINR > 0 && `+ ₹${formatINR(savingsINR)}`}
-                  </span>
-                </div>
-              )}
-
-              {/* Receivables */}
-              {(receivablesAED > 0 || receivablesINR > 0) && (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  alignItems: 'center', fontSize: 13,
-                }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center',
-                    gap: 8, color: 'var(--muted)',
-                  }}>
-                    <CreditCard size={14} color="var(--success)" />
-                    Owed to Me
-                  </div>
-                  <span style={{ fontWeight: 700, color: 'var(--success)' }}>
-                    {receivablesAED > 0 && `+ AED ${formatNumber(receivablesAED)}`}
-                    {receivablesAED > 0 && receivablesINR > 0 && ' · '}
-                    {receivablesINR > 0 && `+ ₹${formatINR(receivablesINR)}`}
-                  </span>
-                </div>
-              )}
-
-              {/* Liabilities */}
-              {(liabilitiesAED > 0 || liabilitiesINR > 0) && (
-                <>
-                  <div style={{
-                    height: 1, background: 'var(--border)', margin: '4px 0',
-                  }} />
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', fontSize: 13,
-                  }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center',
-                      gap: 8, color: 'var(--muted)',
-                    }}>
-                      <CreditCard size={14} color="var(--danger)" />
-                      I Owe
-                    </div>
-                    <span style={{ fontWeight: 700, color: 'var(--danger)' }}>
-                      {liabilitiesAED > 0 && `- AED ${formatNumber(liabilitiesAED)}`}
-                      {liabilitiesAED > 0 && liabilitiesINR > 0 && ' · '}
-                      {liabilitiesINR > 0 && `- ₹${formatINR(liabilitiesINR)}`}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {/* Net Worth total divider */}
-              <div style={{
-                height: 1, background: 'var(--border)', margin: '4px 0',
-              }} />
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center',
-              }}>
-                <span style={{
-                  fontSize: 13, fontWeight: 800, color: 'var(--text)',
-                }}>
-                  Total Net Worth
-                </span>
-                <span style={{
-                  fontSize: 16, fontWeight: 900,
-                  color: netWorthAED >= 0 ? 'var(--primary)' : 'var(--danger)',
-                }}>
-                  {netWorthAED < 0 ? '-' : ''}
-                  AED {formatNumber(netWorthAED)}
-                </span>
-              </div>
+              </span>
             </div>
           </div>
         </div>
-      ) : (
-        /* No opening balance — prompt */
-        <div style={{
-          marginBottom: 24, padding: '16px 20px',
-          background: 'rgba(99,102,241,0.08)',
-          border: '1px solid rgba(99,102,241,0.2)',
-          borderRadius: 16,
-          display: 'flex', alignItems: 'center', gap: 14,
-        }}>
-          <Wallet size={28} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-          <div>
-            <div style={{
-              fontWeight: 800, fontSize: 14, color: 'var(--text)',
-            }}>
-              Set Opening Balances
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
-              Go to{' '}
-              <strong style={{ color: 'var(--primary)' }}>
-                Settings → Opening Balances
-              </strong>{' '}
-              to see live balance per account.
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* ── Month Picker ── */}
       <div style={{

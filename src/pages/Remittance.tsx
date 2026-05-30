@@ -23,6 +23,7 @@ import {
   updateDoc,
   where,
   orderBy,
+  getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
@@ -214,6 +215,7 @@ export default function Remittance({ user }: Props) {
     const rate     = parseFloat(exchangeRate);
     const fee      = parseFloat(transferFeeAED || '0');
     const received = parseFloat(amountReceivedINR);
+    const netAED   = sent - fee;
 
     if (!amountSentAED || sent <= 0) {
       toast.error('Enter valid AED amount'); return;
@@ -232,6 +234,12 @@ export default function Remittance({ user }: Props) {
     const fromMethod = fromAccountId ? getMethodById(fromAccountId) : null;
     const toMethod   = toAccountId   ? getMethodById(toAccountId)   : null;
 
+    // Guaranteed safely extracted variables for Firebase insertion
+    const fromName = fromMethod ? fromMethod.name : null;
+    const fromType = fromMethod ? fromMethod.type : null;
+    const toName = toMethod ? toMethod.name : null;
+    const toType = toMethod ? toMethod.type : null;
+
     setSaving(true);
     try {
       const data = {
@@ -242,65 +250,120 @@ export default function Remittance({ user }: Props) {
         amountReceivedINR: received,
         sentVia: sentVia.trim(),
         fromAccountId: fromAccountId || null,
-        fromAccountName: fromMethod?.name || null,
+        fromAccountName: fromName,
         toAccountId: toAccountId || null,
-        toAccountName: toMethod?.name || null,
+        toAccountName: toName,
         date,
         note: note.trim() === '' ? null : note.trim(),
       };
 
-      if (editingItem?.id) {
-        await updateDoc(doc(db, 'remittances', editingItem.id), data);
-        toast.success('Remittance updated!');
+      let remId = editingItem?.id || null;
+
+      if (remId) {
+        await updateDoc(doc(db, 'remittances', remId), data);
+        const oldTxsQuery = query(collection(db, 'transactions'), where('remittanceId', '==', remId));
+        const oldTxsSnap = await getDocs(oldTxsQuery);
+        const deletePromises = oldTxsSnap.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
       } else {
-        // ✅ Also record as a transaction so balance reflects
-        await addDoc(collection(db, 'remittances'), {
+        const docRef = await addDoc(collection(db, 'remittances'), {
           ...data,
           createdAt: serverTimestamp(),
         });
+        remId = docRef.id;
+      }
 
-        // ✅ Record expense transaction from UAE account (AED deducted)
-        if (fromAccountId) {
+      // ✅ PATCH: Transfer/Expense Split Logic
+      if (fromAccountId) {
+        // 1. Fee is ALWAYS an expense
+        if (fee > 0) {
           await addDoc(collection(db, 'transactions'), {
             userId: user.uid,
             type: 'expense',
-            amount: sent,
+            amount: fee,
             currency: 'AED',
             country: 'UAE',
-            category: 'remittance',
-            paymentMethodId: fromAccountId,
-            paymentMethod: fromMethod?.type || null,
-            paymentMethodName: fromMethod?.name || null,
-            paymentMethodType: fromMethod?.type || null,
-            note: `Remittance via ${sentVia.trim()}${note.trim() ? ' · ' + note.trim() : ''}`,
-            date,
-            isRemittance: true,
+            category: 'Bank Fees',
+            paymentMethodId: fromAccountId || null,
+            paymentMethod: fromType,
+            paymentMethodName: fromName,
+            paymentMethodType: fromType,
+            note: `Transfer fee for ${sentVia.trim()}`,
+            date: date || getToday(),
+            isRemittanceFee: true,
+            remittanceId: remId || null,
             createdAt: serverTimestamp(),
           });
         }
 
-        // ✅ Record income transaction to India account (INR added)
         if (toAccountId) {
+          // 2a. TRANSFER to OWN Account: Deduct AED as a "Transfer Out"
+          if (netAED > 0) {
+            await addDoc(collection(db, 'transactions'), {
+              userId: user.uid,
+              type: 'transfer',
+              amount: netAED,
+              currency: 'AED',
+              country: 'UAE',
+              category: 'Remittance',
+              fromMethod: fromAccountId || null,
+              toMethod: sentVia.trim() || 'Exchange', // Pseudo-account for display
+              note: `Sent to India via ${sentVia.trim()}`,
+              date: date || getToday(),
+              remittanceId: remId || null,
+              createdAt: serverTimestamp(),
+            });
+          }
+        } else {
+          // 2b. SENT TO OTHERS: Deduct AED as an "Expense"
+          if (netAED > 0) {
+            await addDoc(collection(db, 'transactions'), {
+              userId: user.uid,
+              type: 'expense',
+              amount: netAED,
+              currency: 'AED',
+              country: 'UAE',
+              category: 'Remittance',
+              paymentMethodId: fromAccountId || null,
+              paymentMethod: fromType,
+              paymentMethodName: fromName,
+              paymentMethodType: fromType,
+              note: `Remittance to others via ${sentVia.trim()}${note.trim() ? ' · ' + note.trim() : ''}`,
+              date: date || getToday(),
+              isRemittance: true,
+              remittanceId: remId || null,
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      // 3. TRANSFER to OWN Account: Add INR as a "Transfer In"
+      if (toAccountId) {
+        if (received > 0) {
           await addDoc(collection(db, 'transactions'), {
             userId: user.uid,
-            type: 'income',
+            type: 'transfer',
             amount: received,
             currency: 'INR',
             country: 'India',
-            category: 'remittance',
-            paymentMethodId: toAccountId,
-            paymentMethod: toMethod?.type || null,
-            paymentMethodName: toMethod?.name || null,
-            paymentMethodType: toMethod?.type || null,
-            note: `Remittance received via ${sentVia.trim()}${note.trim() ? ' · ' + note.trim() : ''}`,
-            date,
-            isRemittance: true,
+            category: 'Remittance',
+            fromMethod: sentVia.trim() || 'Exchange',
+            toMethod: toAccountId || null,
+            note: `Received remittance via ${sentVia.trim()}`,
+            date: date || getToday(),
+            remittanceId: remId || null,
             createdAt: serverTimestamp(),
           });
         }
-
-        toast.success('Remittance saved! Balances updated.');
       }
+
+      if (editingItem?.id) {
+         toast.success('Remittance and linked accounts updated!');
+      } else {
+         toast.success('Remittance saved! Balances updated.');
+      }
+      
       setShowModal(false);
       resetForm();
     } catch (error) {
@@ -315,6 +378,12 @@ export default function Remittance({ user }: Props) {
     if (!confirm('Delete this remittance record?')) return;
     try {
       await deleteDoc(doc(db, 'remittances', id));
+      
+      const oldTxsQuery = query(collection(db, 'transactions'), where('remittanceId', '==', id));
+      const oldTxsSnap = await getDocs(oldTxsQuery);
+      const deletePromises = oldTxsSnap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(deletePromises);
+      
       toast.success('Deleted!');
     } catch (error) {
       console.error(error);
@@ -619,7 +688,7 @@ export default function Remittance({ user }: Props) {
                   </div>
                 </div>
 
-                {/* ✅ From → To Account display */}
+                {/* From → To Account display */}
                 {(item.fromAccountName || item.toAccountName) && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -738,7 +807,7 @@ export default function Remittance({ user }: Props) {
               </button>
             </div>
 
-            {/* ✅ From Account (UAE) */}
+            {/* From Account (UAE) */}
             <AccountSelector
               label="From Account (UAE — AED deducted)"
               methods={uaeMethods}
@@ -747,7 +816,7 @@ export default function Remittance({ user }: Props) {
               emptyMsg="No UAE accounts. Add in Cards page."
             />
 
-            {/* ✅ To Account (India) */}
+            {/* To Account (India) */}
             <AccountSelector
               label="To Account (India — INR credited)"
               methods={indiaMethods}
@@ -828,7 +897,7 @@ export default function Remittance({ user }: Props) {
               </div>
             </div>
 
-            {/* ✅ Auto-calc preview */}
+            {/* Auto-calc preview */}
             {!manualReceived && amountSentAED && exchangeRate && (
               <div style={{
                 padding: '10px 14px', borderRadius: 12,
@@ -882,7 +951,7 @@ export default function Remittance({ user }: Props) {
               />
             </div>
 
-            {/* ✅ Balance update notice */}
+            {/* Balance update notice */}
             {!editingItem && (fromAccountId || toAccountId) && (
               <div style={{
                 padding: '10px 14px', borderRadius: 12, marginBottom: 14,
