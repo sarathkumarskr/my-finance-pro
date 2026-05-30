@@ -1,1194 +1,1781 @@
+// Cards.tsx
 import { useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
-  CreditCard,
-  Plus,
-  X,
-  Trash2,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Pencil,
-  Wallet,
-} from 'lucide-react';
-import toast from 'react-hot-toast';
-import {
-  collection,
-  addDoc,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-  serverTimestamp,
-  updateDoc,
-  getDocs,
+  addDoc, collection, deleteDoc, doc,
+  onSnapshot, query, Timestamp,
+  updateDoc, where,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { toast } from 'react-hot-toast';
+import {
+  Plus, Pencil, Trash2, X, ChevronDown, ChevronUp,
+  CreditCard, Wallet, Building2, Smartphone,
+  AlertCircle, Calculator, TrendingDown,
+} from 'lucide-react';
 
-type Props = { user: User };
+// ── Types ──────────────────────────────────────────────────────────────────────
 
-type CardType = 'credit' | 'debit' | 'tabby' | 'cash' | 'upi' | 'custom';
-type Country = 'UAE' | 'India' | 'Both';
+type CardType = 'credit' | 'debit' | 'cash' | 'upi' | 'tabby' | 'custom';
+type Country  = 'UAE' | 'India' | 'Both';
+type ConversionType =
+  | 'zero_interest'
+  | 'reducing_balance'
+  | 'flat_rate'
+  | 'minimum_payment';
 
-type PaymentMethod = {
-  id?: string;
-  userId: string;
-  type: CardType;
-  name: string;
-  bankName?: string;
-  country: Country;
-  creditLimit?: number;
-  statementDate?: number;
-  paymentDueDate?: number;
-  currentBalance?: number;
-  isTabbyPro?: boolean;
-  tabbyStatementDate?: number;
-  tabbyPaymentDueDate?: number;
-  cashEnvelopeAmount?: number;
-  cashSpent?: number;
-  color?: string;
-  isCashDefault?: boolean;
-  createdAt?: any;
-};
-
-type TabbyEMI = {
-  id?: string;
-  userId: string;
-  paymentMethodId: string;
-  itemName: string;
-  totalAmount: number;
-  purchaseDate: string;
-  emis: {
-    number: number;
-    amount: number;
-    dueDate: string;
-    paid: boolean;
-  }[];
-  createdAt?: any;
-};
-
-type OpeningBalance = {
-  id?: string;
-  userId: string;
-  uaeCash: number;
-  indiaCash: number;
-  perMethod: Record<string, number>;
-  asOf: string;
-};
-
-type Transaction = {
+interface EMI {
   id: string;
-  userId: string;
-  type: 'income' | 'expense';
-  amount: number;
-  currency: string;
-  paymentMethodId: string | null;
-  date: string;
-};
-
-const cardColors = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#10b981',
-  '#f59e0b', '#0ea5e9', '#ef4444', '#14b8a6',
-];
-
-const cardTypeConfig: Record<CardType, { label: string; icon: string }> = {
-  credit: { label: 'Credit Card',   icon: '💳' },
-  debit:  { label: 'Debit Card',    icon: '🏦' },
-  tabby:  { label: 'Tabby Card',    icon: '🛍️' },
-  cash:   { label: 'Cash Envelope', icon: '💵' },
-  upi:    { label: 'UPI',           icon: '📱' },
-  custom: { label: 'Custom',        icon: '➕' },
-};
-
-// ✅ FIXED: Self-healing — deletes duplicates, creates missing
-async function ensureDefaultCashAccounts(userId: string) {
-  const q = query(
-    collection(db, 'paymentMethods'),
-    where('userId', '==', userId),
-    where('isCashDefault', '==', true)
-  );
-  const snap = await getDocs(q);
-
-  const existing = snap.docs.map((d) => ({
-    id: d.id,
-    ...d.data(),
-  } as PaymentMethod));
-
-  const uaeDocs   = existing.filter((m) => m.country === 'UAE');
-  const indiaDocs = existing.filter((m) => m.country === 'India');
-
-  // ✅ Delete UAE duplicates — keep only first
-  if (uaeDocs.length > 1) {
-    for (let i = 1; i < uaeDocs.length; i++) {
-      await deleteDoc(doc(db, 'paymentMethods', uaeDocs[i].id!));
-    }
-  }
-
-  // ✅ Delete India duplicates — keep only first
-  if (indiaDocs.length > 1) {
-    for (let i = 1; i < indiaDocs.length; i++) {
-      await deleteDoc(doc(db, 'paymentMethods', indiaDocs[i].id!));
-    }
-  }
-
-  // ✅ Create UAE cash if none exists
-  if (uaeDocs.length === 0) {
-    await addDoc(collection(db, 'paymentMethods'), {
-      userId,
-      type: 'cash',
-      name: 'Cash',
-      bankName: '',
-      country: 'UAE',
-      color: '#10b981',
-      isCashDefault: true,
-      cashEnvelopeAmount: 0,
-      cashSpent: 0,
-      createdAt: serverTimestamp(),
-    });
-  }
-
-  // ✅ Create India cash if none exists
-  if (indiaDocs.length === 0) {
-    await addDoc(collection(db, 'paymentMethods'), {
-      userId,
-      type: 'cash',
-      name: 'Cash',
-      bankName: '',
-      country: 'India',
-      color: '#f59e0b',
-      isCashDefault: true,
-      cashEnvelopeAmount: 0,
-      cashSpent: 0,
-      createdAt: serverTimestamp(),
-    });
-  }
+  description: string;
+  conversionType: ConversionType;
+  principalAmount: number;
+  interestRate: number | null;      // monthly %
+  totalPayable: number;
+  totalInterest: number;
+  monthlyAmount: number;
+  minimumDue: number | null;        // for minimum_payment type
+  tenure: number;
+  remainingMonths: number;
+  paidMonths: number;
+  startDate: string;                // YYYY-MM
+  outstandingPrincipal: number;
 }
 
-export default function Cards({ user }: Props) {
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [tabbyEMIs, setTabbyEMIs]           = useState<TabbyEMI[]>([]);
-  const [openingBal, setOpeningBal]         = useState<OpeningBalance | null>(null);
-  const [transactions, setTransactions]     = useState<Transaction[]>([]);
-  const [showModal, setShowModal]           = useState(false);
-  const [expandedCard, setExpandedCard]     = useState<string | null>(null);
-  const [editingMethod, setEditingMethod]   = useState<PaymentMethod | null>(null);
-  const [saving, setSaving]                 = useState(false);
-  const [initializing, setInitializing]     = useState(true);
+interface PaymentMethod {
+  id: string;
+  userId: string;
+  name: string;
+  type: CardType;
+  country: Country;
+  bankName: string | null;
+  color: string | null;
+  isCashDefault: boolean;
+  creditLimit: number | null;
+  openingUsed: number | null;
+  statementDate: number | null;
+  dueDate: number | null;
+  emis: EMI[];
+}
 
-  // form state
-  const [cardType, setCardType]                       = useState<CardType>('credit');
-  const [cardName, setCardName]                       = useState('');
-  const [bankName, setBankName]                       = useState('');
-  const [country, setCountry]                         = useState<Country>('UAE');
-  const [creditLimit, setCreditLimit]                 = useState('');
-  const [statementDate, setStatementDate]             = useState('20');
-  const [paymentDueDate, setPaymentDueDate]           = useState('15');
-  const [currentBalance, setCurrentBalance]           = useState('');
-  const [isTabbyPro, setIsTabbyPro]                   = useState(false);
-  const [tabbyStatementDate, setTabbyStatementDate]   = useState('24');
-  const [tabbyPaymentDueDate, setTabbyPaymentDueDate] = useState('3');
-  const [cashEnvelopeAmount, setCashEnvelopeAmount]   = useState('');
-  const [selectedColor, setSelectedColor]             = useState(cardColors[0]);
-  const [customName, setCustomName]                   = useState('');
+interface Transaction {
+  id: string;
+  type: 'income' | 'expense' | 'transfer';
+  amount: number;
+  currency: 'AED' | 'INR';
+  paymentMethodId?: string;
+  fromMethod?: string;
+  toMethod?: string;
+  date: string;
+  userId: string;
+}
 
-  // ── Auto-create / fix default cash accounts ──
-  useEffect(() => {
-    if (!user?.uid) return;
-    ensureDefaultCashAccounts(user.uid)
-      .catch(console.error)
-      .finally(() => setInitializing(false));
-  }, [user.uid]);
+interface OpeningBalance {
+  perMethod: Record<string, number>;
+  asOf: string;
+}
 
-  // ── Payment methods listener ──
-  useEffect(() => {
-    const q = query(
-      collection(db, 'paymentMethods'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-    return onSnapshot(q, (snap) => {
-      setPaymentMethods(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() })) as PaymentMethod[]
-      );
-    });
-  }, [user.uid]);
+// ── Constants ──────────────────────────────────────────────────────────────────
 
-  // ── Tabby EMIs ──
-  useEffect(() => {
-    const q = query(
-      collection(db, 'tabbyEMIs'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-    return onSnapshot(q, (snap) => {
-      setTabbyEMIs(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() })) as TabbyEMI[]
-      );
-    });
-  }, [user.uid]);
+const CARD_TYPES: { value: CardType; label: string; icon: string }[] = [
+  { value: 'credit', label: 'Credit Card', icon: '💳' },
+  { value: 'debit',  label: 'Debit Card',  icon: '🏦' },
+  { value: 'cash',   label: 'Cash',        icon: '💵' },
+  { value: 'upi',    label: 'UPI / GPay',  icon: '📱' },
+  { value: 'tabby',  label: 'Tabby',       icon: '🛍️' },
+  { value: 'custom', label: 'Other',       icon: '➕' },
+];
 
-  // ── Opening balances ──
-  useEffect(() => {
-    const q = query(
-      collection(db, 'openingBalances'),
-      where('userId', '==', user.uid)
-    );
-    return onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        const first = snap.docs[0];
-        const data  = first.data() as OpeningBalance;
-        setOpeningBal({
-          id: first.id,
-          userId: data.userId,
-          uaeCash: data.uaeCash ?? 0,
-          indiaCash: data.indiaCash ?? 0,
-          perMethod:
-            data.perMethod && typeof data.perMethod === 'object'
-              ? { ...data.perMethod } : {},
-          asOf: data.asOf ?? new Date().toISOString().slice(0, 10),
-        });
-      } else {
-        setOpeningBal(null);
-      }
-    });
-  }, [user.uid]);
+const COUNTRIES: { value: Country; label: string; flag: string }[] = [
+  { value: 'UAE',   label: 'UAE',   flag: '🇦🇪' },
+  { value: 'India', label: 'India', flag: '🇮🇳' },
+  { value: 'Both',  label: 'Both',  flag: '🌐' },
+];
 
-  // ── Transactions ──
-  useEffect(() => {
-    const q = query(
-      collection(db, 'transactions'),
-      where('userId', '==', user.uid)
-    );
-    return onSnapshot(q, (snap) => {
-      setTransactions(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Transaction[]
-      );
-    });
-  }, [user.uid]);
+const CONVERSION_TYPES: {
+  value: ConversionType; label: string; icon: string; desc: string;
+}[] = [
+  {
+    value: 'zero_interest',
+    label: '0% Plan',
+    icon: '✅',
+    desc: 'No interest, fixed monthly',
+  },
+  {
+    value: 'reducing_balance',
+    label: 'Reducing Balance',
+    icon: '📉',
+    desc: 'Interest on outstanding (bank EMI)',
+  },
+  {
+    value: 'flat_rate',
+    label: 'Flat Rate',
+    icon: '📊',
+    desc: 'Fixed interest on principal',
+  },
+  {
+    value: 'minimum_payment',
+    label: 'Min Payment',
+    icon: '⚠️',
+    desc: 'Revolving — pay minimum monthly',
+  },
+];
 
-  // ── Current Balance Calculation ──
-  const getCurrentBalance = (pmId: string): number | null => {
-    if (!openingBal) return null;
-    const opening = openingBal.perMethod[pmId] ?? 0;
-    const asOf    = openingBal.asOf;
-    const delta   = transactions
-      .filter((tx) => tx.paymentMethodId === pmId && tx.date >= asOf)
-      .reduce((sum, tx) =>
-        tx.type === 'income' ? sum + tx.amount : sum - tx.amount, 0);
-    return opening + delta;
+const COLORS = [
+  '#6366f1','#10b981','#f59e0b','#ef4444',
+  '#3b82f6','#8b5cf6','#ec4899','#14b8a6',
+];
+
+const UAE_BANKS = [
+  'ENBD','FAB','ADCB','Mashreq','DIB',
+  'CBD','RAK Bank','HSBC UAE','Citibank UAE','Other',
+];
+const INDIA_BANKS = [
+  'SBI','HDFC','ICICI','Axis','Kotak',
+  'PNB','BOB','Canara','IndusInd','Federal','Other',
+];
+
+// ── Styles ─────────────────────────────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '11px 12px', borderRadius: 12,
+  border: '1px solid var(--border)', background: 'var(--bg)',
+  color: 'var(--text)', fontSize: 14, outline: 'none',
+  boxSizing: 'border-box',
+};
+const labelStyle: React.CSSProperties = {
+  fontSize: 12, color: 'var(--muted)', marginBottom: 6,
+  display: 'block', fontWeight: 600,
+};
+
+// ── Pure Calculation Helpers ───────────────────────────────────────────────────
+
+interface CalcResult {
+  monthlyAmount: number;
+  totalPayable: number;
+  totalInterest: number;
+}
+
+function calcZeroInterest(principal: number, tenure: number): CalcResult {
+  const monthly = tenure > 0 ? principal / tenure : 0;
+  return {
+    monthlyAmount: monthly,
+    totalPayable: principal,
+    totalInterest: 0,
   };
+}
 
-  // ── Form helpers ──
-  const resetForm = () => {
-    setCardType('credit'); setCardName(''); setBankName('');
-    setCountry('UAE'); setCreditLimit(''); setStatementDate('20');
-    setPaymentDueDate('15'); setCurrentBalance('');
-    setIsTabbyPro(false);
-    setTabbyStatementDate('24'); setTabbyPaymentDueDate('3');
-    setCashEnvelopeAmount(''); setSelectedColor(cardColors[0]);
-    setCustomName(''); setEditingMethod(null);
+// EMI = P × r × (1+r)^n / ((1+r)^n - 1)
+function calcReducingBalance(
+  principal: number,
+  monthlyRate: number,  // e.g. 3.5
+  tenure: number,
+): CalcResult {
+  if (monthlyRate <= 0) return calcZeroInterest(principal, tenure);
+  const r   = monthlyRate / 100;
+  const pow = Math.pow(1 + r, tenure);
+  const emi = tenure > 0 ? (principal * r * pow) / (pow - 1) : 0;
+  return {
+    monthlyAmount: emi,
+    totalPayable:  emi * tenure,
+    totalInterest: emi * tenure - principal,
   };
+}
 
-  const openAddModal = () => { resetForm(); setShowModal(true); };
-
-  const openEditModal = (method: PaymentMethod) => {
-    setEditingMethod(method);
-    setCardType(method.type);
-    setCardName(method.type === 'custom' ? '' : method.name || '');
-    setCustomName(method.type === 'custom' ? method.name || '' : '');
-    setBankName(method.bankName || '');
-    setCountry(method.country || 'UAE');
-    setCreditLimit(
-      method.creditLimit !== undefined ? String(method.creditLimit) : ''
-    );
-    setStatementDate(
-      method.statementDate !== undefined ? String(method.statementDate) : '20'
-    );
-    setPaymentDueDate(
-      method.paymentDueDate !== undefined ? String(method.paymentDueDate) : '15'
-    );
-    setCurrentBalance(
-      method.currentBalance !== undefined ? String(method.currentBalance) : ''
-    );
-    setIsTabbyPro(method.isTabbyPro ?? false);
-    setTabbyStatementDate(
-      method.tabbyStatementDate !== undefined
-        ? String(method.tabbyStatementDate) : '24'
-    );
-    setTabbyPaymentDueDate(
-      method.tabbyPaymentDueDate !== undefined
-        ? String(method.tabbyPaymentDueDate) : '3'
-    );
-    setCashEnvelopeAmount(
-      method.cashEnvelopeAmount !== undefined
-        ? String(method.cashEnvelopeAmount) : ''
-    );
-    setSelectedColor(method.color || cardColors[0]);
-    setShowModal(true);
+function calcFlatRate(
+  principal: number,
+  monthlyRate: number,  // e.g. 2%/month
+  tenure: number,
+): CalcResult {
+  const totalInterest = principal * (monthlyRate / 100) * tenure;
+  const monthly       = tenure > 0 ? (principal + totalInterest) / tenure : 0;
+  return {
+    monthlyAmount: monthly,
+    totalPayable:  principal + totalInterest,
+    totalInterest,
   };
+}
 
-  const handleSave = async () => {
-    const resolvedName =
-      cardType === 'custom' ? customName.trim()
-      : cardType === 'cash' ? 'Cash'
-      : cardType === 'upi'  ? (cardName || 'UPI').trim()
-      : cardName.trim();
-
-    if (!resolvedName) {
-      toast.error('Enter a name for this payment method');
-      return;
-    }
-    setSaving(true);
-    try {
-      const data: any = {
-        userId: user.uid,
-        type: cardType,
-        name: resolvedName,
-        bankName: bankName.trim() || '',
-        country,
-        color: selectedColor,
-        isCashDefault: false,
-      };
-      if (cardType === 'credit') {
-        data.creditLimit    = parseFloat(creditLimit) || 0;
-        data.statementDate  = parseInt(statementDate) || 20;
-        data.paymentDueDate = parseInt(paymentDueDate) || 15;
-      }
-      if (cardType === 'debit') {
-        data.currentBalance = parseFloat(currentBalance) || 0;
-      }
-      if (cardType === 'tabby') {
-        data.isTabbyPro          = !!isTabbyPro;
-        data.tabbyStatementDate  = parseInt(tabbyStatementDate) || 24;
-        data.tabbyPaymentDueDate = parseInt(tabbyPaymentDueDate) || 3;
-      }
-      if (cardType === 'cash') {
-        data.cashEnvelopeAmount = parseFloat(cashEnvelopeAmount) || 0;
-        data.cashSpent          = 0;
-      }
-
-      if (editingMethod?.id) {
-        await updateDoc(doc(db, 'paymentMethods', editingMethod.id), data);
-        toast.success('Payment method updated!');
-      } else {
-        await addDoc(collection(db, 'paymentMethods'), {
-          ...data, createdAt: serverTimestamp(),
-        });
-        toast.success('Payment method added!');
-      }
-      setShowModal(false);
-      resetForm();
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to save');
-    }
-    setSaving(false);
-  };
-
-  const handleDelete = async (pm: PaymentMethod) => {
-    if (pm.isCashDefault) {
-      toast.error('Default cash accounts cannot be deleted');
-      return;
-    }
-    if (!confirm('Delete this payment method?')) return;
-    try {
-      await deleteDoc(doc(db, 'paymentMethods', pm.id!));
-      toast.success('Deleted!');
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to delete');
-    }
-  };
-
-  const getTabbyEMIsForCard = (cardId: string) =>
-    tabbyEMIs.filter((e) => e.paymentMethodId === cardId);
-
-  const getUpcomingDues = () => {
-    const today = new Date();
-    const upcoming: {
-      name: string; amount: string; dueDate: string; urgent: boolean;
-    }[] = [];
-    paymentMethods.forEach((pm) => {
-      if (pm.type === 'tabby') {
-        getTabbyEMIsForCard(pm.id!).forEach((emi) => {
-          emi.emis.filter((e) => !e.paid).forEach((e) => {
-            const diff = Math.ceil(
-              (new Date(e.dueDate).getTime() - today.getTime()) / 86400000
-            );
-            if (diff >= 0 && diff <= 30) {
-              upcoming.push({
-                name: `${pm.name} - ${emi.itemName} EMI ${e.number}`,
-                amount: `AED ${e.amount.toFixed(2)}`,
-                dueDate: e.dueDate,
-                urgent: diff <= 5,
-              });
-            }
-          });
-        });
-      }
-    });
-    return upcoming.sort(
-      (a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-    );
-  };
-
-  const upcomingDues   = getUpcomingDues();
-  const currencySymbol = (pm: PaymentMethod) =>
-    pm.country === 'India' ? '₹' : 'AED';
-
-  const formatBalance = (pm: PaymentMethod, bal: number) => {
-    const sym = currencySymbol(pm);
-    const abs = Math.abs(bal);
-    const fmt = pm.country === 'India'
-      ? abs.toLocaleString('en-IN', { maximumFractionDigits: 0 })
-      : abs.toLocaleString('en-US', {
-          minimumFractionDigits: 2, maximumFractionDigits: 2,
-        });
-    return bal < 0 ? `-${sym} ${fmt}` : `${sym} ${fmt}`;
-  };
-
-  if (initializing) {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '60vh', flexDirection: 'column', gap: 16,
-      }}>
-        <div className="spinner" />
-        <span style={{ color: 'var(--muted)', fontSize: 14 }}>
-          Setting up accounts…
-        </span>
-      </div>
-    );
+// For minimum payment — interest accrues monthly on outstanding
+function calcMinPaymentSummary(
+  outstanding: number,
+  monthlyRate: number,
+  minimumDue: number,
+): { monthsToPayoff: number; totalInterest: number } {
+  if (minimumDue <= 0 || monthlyRate <= 0)
+    return { monthsToPayoff: 0, totalInterest: 0 };
+  let bal       = outstanding;
+  let months    = 0;
+  let totalInt  = 0;
+  while (bal > 0.01 && months < 600) {
+    const interest = bal * (monthlyRate / 100);
+    totalInt += interest;
+    bal       = bal + interest - minimumDue;
+    if (bal < 0) bal = 0;
+    months++;
   }
+  return { monthsToPayoff: months, totalInterest: totalInt };
+}
 
+// ── Formatting ─────────────────────────────────────────────────────────────────
+
+function fmtAED(n: number) {
+  return `AED ${Math.abs(n).toLocaleString('en-US', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+}
+function fmtINR(n: number) {
+  return `₹${Math.abs(n).toLocaleString('en-IN', {
+    maximumFractionDigits: 0,
+  })}`;
+}
+function fmt(n: number, country: string) {
+  return country === 'India' ? fmtINR(n) : fmtAED(n);
+}
+function pad2(n: number) { return String(n).padStart(2, '0'); }
+function getCurrentMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+function getDaysLeft(day: number): number {
+  const now = new Date();
+  let   due = new Date(now.getFullYear(), now.getMonth(), day);
+  if (due <= now)
+    due = new Date(now.getFullYear(), now.getMonth() + 1, day);
+  return Math.ceil((due.getTime() - now.getTime()) / 86_400_000);
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
+function UtilizationBar({ used, limit }: { used: number; limit: number }) {
+  const pct   = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+  const color = pct > 80 ? 'var(--danger)'
+              : pct > 60 ? 'var(--warning)'
+              : 'var(--success)';
   return (
     <div>
-      {/* ── Page Header ── */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Cards & Payment Methods</h1>
-          <p className="page-subtitle">
-            Manage cash, debit cards, credit cards, Tabby and UPI
-          </p>
+      <div style={{
+        height: 8, borderRadius: 99,
+        background: 'rgba(255,255,255,0.08)', overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%', width: `${pct}%`, borderRadius: 99,
+          background: color, transition: 'width 0.5s ease',
+        }} />
+      </div>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        fontSize: 11, color: 'var(--muted)', marginTop: 4,
+      }}>
+        <span style={{ color, fontWeight: 700 }}>
+          {pct.toFixed(1)}% utilization
+        </span>
+        <span>Available: {fmtAED(Math.max(limit - used, 0))}</span>
+      </div>
+    </div>
+  );
+}
+
+function DueBadge({
+  dueDate, statementDate,
+}: { dueDate: number; statementDate: number | null }) {
+  const days  = getDaysLeft(dueDate);
+  const color = days <= 3 ? 'var(--danger)'
+              : days <= 7 ? 'var(--warning)'
+              : 'var(--success)';
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+      <span style={{
+        padding: '4px 10px', borderRadius: 99,
+        background: `${color}18`, border: `1px solid ${color}40`,
+        fontSize: 12, color, fontWeight: 700,
+      }}>
+        {days <= 0
+          ? '⚠️ Overdue!'
+          : `⏰ Due in ${days}d (${dueDate}th)`}
+      </span>
+      {statementDate && (
+        <span style={{
+          padding: '4px 10px', borderRadius: 99,
+          background: 'rgba(99,102,241,0.1)',
+          border: '1px solid rgba(99,102,241,0.25)',
+          fontSize: 12, color: 'var(--primary)', fontWeight: 700,
+        }}>
+          📄 Statement: {statementDate}th
+        </span>
+      )}
+    </div>
+  );
+}
+
+function InfoRow({
+  label, value, color = 'var(--text)', bold = false,
+}: { label: string; value: string; color?: string; bold?: boolean }) {
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between',
+      alignItems: 'center', fontSize: 13, padding: '4px 0',
+    }}>
+      <span style={{ color: 'var(--muted)' }}>{label}</span>
+      <span style={{ color, fontWeight: bold ? 900 : 600 }}>{value}</span>
+    </div>
+  );
+}
+
+// ── EMI Card ───────────────────────────────────────────────────────────────────
+
+function EMICard({
+  emi, country, onRemove,
+}: { emi: EMI; country: string; onRemove: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const progress = emi.tenure > 0
+    ? ((emi.paidMonths) / emi.tenure) * 100 : 0;
+
+  const typeInfo = CONVERSION_TYPES.find((c) => c.value === emi.conversionType);
+  const isMinPay = emi.conversionType === 'minimum_payment';
+
+  // For min payment — recalc payoff
+  const minPaySummary = isMinPay && emi.interestRate && emi.minimumDue
+    ? calcMinPaymentSummary(
+        emi.outstandingPrincipal,
+        emi.interestRate,
+        emi.minimumDue,
+      )
+    : null;
+
+  return (
+    <div style={{
+      background: 'var(--card)', borderRadius: 14,
+      border: '1px solid var(--border)',
+      overflow: 'hidden',
+    }}>
+      {/* Header row */}
+      <div
+        style={{
+          padding: '12px 14px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}
+        onClick={() => setExpanded((p) => !p)}
+      >
+        <span style={{ fontSize: 20 }}>{typeInfo?.icon ?? '💳'}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontWeight: 800, fontSize: 14, color: 'var(--text)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {emi.description}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+            {typeInfo?.label}
+            {emi.interestRate
+              ? ` · ${emi.interestRate}%/mo`
+              : ''}
+            {!isMinPay
+              ? ` · ${emi.remainingMonths} months left`
+              : ''}
+          </div>
         </div>
-        <div className="header-actions">
-          <button className="btn btn-primary" onClick={openAddModal}>
-            <Plus size={16} /> Add Payment Method
-          </button>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: 14, fontWeight: 900,
+            color: isMinPay ? 'var(--danger)' : 'var(--warning)',
+          }}>
+            {isMinPay
+              ? `${fmt(emi.minimumDue ?? 0, country)}/mo min`
+              : `${fmt(emi.monthlyAmount, country)}/mo`}
+          </div>
+          {!isMinPay && (
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              Outstanding: {fmt(emi.outstandingPrincipal, country)}
+            </div>
+          )}
+        </div>
+        <div style={{ color: 'var(--muted)', flexShrink: 0 }}>
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </div>
       </div>
 
-      {/* Opening balance notice */}
-      {!openingBal && (
-        <div style={{
-          marginBottom: 16, padding: '12px 16px',
-          background: 'rgba(99,102,241,0.08)',
-          border: '1px solid rgba(99,102,241,0.2)',
-          borderRadius: 12,
-          display: 'flex', alignItems: 'center', gap: 10,
-          fontSize: 13, color: 'var(--muted)',
-        }}>
-          <Wallet size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-          Set opening balances in{' '}
-          <strong style={{ color: 'var(--text)', margin: '0 4px' }}>Settings</strong>
-          {' '}to see live balance calculations.
-        </div>
-      )}
-
-      {/* Upcoming dues */}
-      {upcomingDues.length > 0 && (
-        <div style={{
-          marginBottom: 20, padding: 16,
-          background: 'rgba(245,158,11,0.1)',
-          border: '1px solid rgba(245,158,11,0.3)',
-          borderRadius: 16,
-        }}>
+      {/* Progress bar — non min-payment */}
+      {!isMinPay && (
+        <div style={{ padding: '0 14px 10px' }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            marginBottom: 12, fontWeight: 700, color: 'var(--warning)',
+            height: 5, borderRadius: 99,
+            background: 'rgba(255,255,255,0.08)', overflow: 'hidden',
           }}>
-            <AlertCircle size={18} /> Upcoming Payments
+            <div style={{
+              height: '100%', width: `${progress}%`,
+              background: 'var(--primary)', borderRadius: 99,
+              transition: 'width 0.5s',
+            }} />
           </div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {upcomingDues.map((due, i) => (
-              <div key={i} style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '8px 12px',
-                background: due.urgent
-                  ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.06)',
-                borderRadius: 10, fontSize: 13,
-              }}>
-                <span>{due.name}</span>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <strong>{due.amount}</strong>
-                  <span style={{
-                    color: due.urgent ? 'var(--danger)' : 'var(--warning)',
-                    fontWeight: 700,
-                  }}>
-                    {due.dueDate}
-                  </span>
-                </div>
-              </div>
-            ))}
+          <div style={{
+            fontSize: 10, color: 'var(--muted)', marginTop: 3, textAlign: 'right',
+          }}>
+            {emi.paidMonths}/{emi.tenure} months paid
           </div>
         </div>
       )}
 
-      {/* ── Payment Methods Grid ── */}
-      {paymentMethods.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
-          <CreditCard size={40} style={{ marginBottom: 12, opacity: 0.4 }} />
-          <p style={{ fontSize: 16, fontWeight: 600 }}>
-            No payment methods added yet
-          </p>
+      {/* Min payment warning */}
+      {isMinPay && emi.interestRate && (
+        <div style={{
+          margin: '0 14px 10px',
+          padding: '8px 12px', borderRadius: 10,
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.2)',
+          fontSize: 12,
+        }}>
+          <div style={{ color: 'var(--danger)', fontWeight: 700 }}>
+            ⚠️ Revolving Credit — Interest Accruing
+          </div>
+          {minPaySummary && (
+            <div style={{ color: 'var(--muted)', marginTop: 4 }}>
+              At {emi.interestRate}%/mo + min {fmt(emi.minimumDue ?? 0, country)}/mo:
+              payoff in ~{minPaySummary.monthsToPayoff} months,
+              total interest: {fmt(minPaySummary.totalInterest, country)}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="grid grid-2" style={{ marginBottom: 20 }}>
-          {paymentMethods.map((pm) => {
-            const currentBal = pm.id ? getCurrentBalance(pm.id) : null;
-            const hasBalance = currentBal !== null;
+      )}
 
-            return (
-              <div key={pm.id} className="card">
-                {/* Card Header */}
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  alignItems: 'flex-start', marginBottom: 12,
-                }}>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <div style={{
-                      width: 44, height: 44, borderRadius: 14,
-                      background: pm.color || 'var(--primary)',
-                      display: 'grid', placeItems: 'center', fontSize: 20,
-                    }}>
-                      {cardTypeConfig[pm.type].icon}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 15 }}>
-                        {pm.name}
-                        {pm.isCashDefault && (
-                          <span style={{
-                            marginLeft: 6, fontSize: 10, fontWeight: 700,
-                            padding: '2px 6px', borderRadius: 999,
-                            background: 'rgba(16,185,129,0.15)',
-                            color: 'var(--success)',
-                          }}>
-                            DEFAULT
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {pm.bankName && `${pm.bankName} · `}
-                        {cardTypeConfig[pm.type].label} ·{' '}
-                        {pm.country === 'UAE' ? '🇦🇪'
-                          : pm.country === 'India' ? '🇮🇳' : '🌍'}
-                      </div>
-                    </div>
+      {/* Expanded detail */}
+      {expanded && (
+        <div style={{
+          padding: '10px 14px 14px',
+          borderTop: '1px solid var(--border)',
+        }}>
+          <InfoRow label="Principal"
+            value={fmt(emi.principalAmount, country)} />
+          <InfoRow label="Outstanding"
+            value={fmt(emi.outstandingPrincipal, country)}
+            color="var(--warning)" bold />
+          {emi.totalInterest > 0 && (
+            <InfoRow label="Total Interest"
+              value={fmt(emi.totalInterest, country)}
+              color="var(--danger)" />
+          )}
+          <InfoRow label="Total Payable"
+            value={fmt(emi.totalPayable, country)} />
+          {emi.interestRate && (
+            <InfoRow label="Interest Rate"
+              value={`${emi.interestRate}% / month`} />
+          )}
+          <InfoRow label="Started" value={emi.startDate} />
+          {!isMinPay && (
+            <>
+              <InfoRow label="Tenure" value={`${emi.tenure} months`} />
+              <InfoRow label="Remaining" value={`${emi.remainingMonths} months`} />
+            </>
+          )}
+
+          <button
+            type="button" onClick={onRemove}
+            style={{
+              marginTop: 12, width: '100%', padding: '9px',
+              borderRadius: 10, cursor: 'pointer',
+              border: '1px solid rgba(239,68,68,0.3)',
+              background: 'rgba(239,68,68,0.08)',
+              color: 'var(--danger)', fontWeight: 700, fontSize: 13,
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'center', gap: 6,
+            }}
+          >
+            <Trash2 size={14} /> Remove EMI
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── EMI Form ───────────────────────────────────────────────────────────────────
+
+function EMIForm({
+  pm,
+  onSave,
+  onCancel,
+}: {
+  pm: PaymentMethod;
+  onSave: (emi: EMI) => void;
+  onCancel: () => void;
+}) {
+  const country = pm.country === 'India' ? 'India' : 'UAE';
+
+  const [convType,    setConvType]    = useState<ConversionType>('zero_interest');
+  const [desc,        setDesc]        = useState('');
+  const [principal,   setPrincipal]   = useState('');
+  const [rate,        setRate]        = useState('');
+  const [tenure,      setTenure]      = useState('');
+  const [paidMonths,  setPaidMonths]  = useState('0');
+  const [startDate,   setStartDate]   = useState(getCurrentMonth());
+  const [minimumDue,  setMinimumDue]  = useState('');
+  const [calcResult,  setCalcResult]  = useState<CalcResult | null>(null);
+  const [minSummary,  setMinSummary]  = useState<{
+    monthsToPayoff: number; totalInterest: number;
+  } | null>(null);
+
+  const isZero    = convType === 'zero_interest';
+  const isMin     = convType === 'minimum_payment';
+  const needsRate = !isZero && !isMin;
+
+  const calculate = () => {
+    const p = parseFloat(principal);
+    const t = parseInt(tenure);
+    const r = parseFloat(rate);
+    const m = parseFloat(minimumDue);
+
+    if (!p || p <= 0) { toast.error('Enter principal amount'); return; }
+
+    if (isMin) {
+      if (!r || r <= 0) { toast.error('Enter interest rate'); return; }
+      if (!m || m <= 0) { toast.error('Enter minimum due amount'); return; }
+      const summary = calcMinPaymentSummary(p, r, m);
+      setMinSummary(summary);
+      setCalcResult({
+        monthlyAmount: m,
+        totalPayable: p + summary.totalInterest,
+        totalInterest: summary.totalInterest,
+      });
+      return;
+    }
+
+    if (!t || t <= 0) { toast.error('Enter tenure'); return; }
+
+    let result: CalcResult;
+    if (isZero) {
+      result = calcZeroInterest(p, t);
+    } else if (convType === 'reducing_balance') {
+      if (!r || r <= 0) { toast.error('Enter interest rate'); return; }
+      result = calcReducingBalance(p, r, t);
+    } else {
+      if (!r || r <= 0) { toast.error('Enter interest rate'); return; }
+      result = calcFlatRate(p, r, t);
+    }
+    setCalcResult(result);
+  };
+
+  const handleSave = () => {
+    if (!desc.trim())     { toast.error('Enter description'); return; }
+    if (!principal)       { toast.error('Enter amount'); return; }
+    const p    = parseFloat(principal);
+    const t    = parseInt(tenure) || 0;
+    const paid = parseInt(paidMonths) || 0;
+    const r    = parseFloat(rate) || 0;
+    const m    = parseFloat(minimumDue) || 0;
+
+    if (!calcResult) { toast.error('Calculate first'); return; }
+
+    // Outstanding principal calculation
+    let outstanding = p;
+    if (!isMin && paid > 0) {
+      if (isZero || convType === 'flat_rate') {
+        outstanding = Math.max(p - (calcResult.monthlyAmount * paid), 0);
+      } else {
+        // Reducing balance — recalculate outstanding
+        let bal = p;
+        for (let i = 0; i < paid; i++) {
+          const interest  = bal * (r / 100);
+          const principal = calcResult.monthlyAmount - interest;
+          bal = Math.max(bal - principal, 0);
+        }
+        outstanding = bal;
+      }
+    }
+
+    const emi: EMI = {
+      id: Date.now().toString(),
+      description: desc.trim(),
+      conversionType: convType,
+      principalAmount: p,
+      interestRate: needsRate || isMin ? r : null,
+      totalPayable: calcResult.totalPayable,
+      totalInterest: calcResult.totalInterest,
+      monthlyAmount: calcResult.monthlyAmount,
+      minimumDue: isMin ? m : null,
+      tenure: isMin ? 0 : t,
+      remainingMonths: isMin ? 0 : Math.max(t - paid, 0),
+      paidMonths: paid,
+      startDate,
+      outstandingPrincipal: isMin ? p : outstanding,
+    };
+
+    onSave(emi);
+  };
+
+  return (
+    <div style={{
+      background: 'var(--card)', borderRadius: 16,
+      border: '1px solid var(--border)',
+      padding: 16, marginBottom: 12,
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', marginBottom: 16,
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <Calculator size={18} color="var(--primary)" />
+          <span style={{ fontWeight: 800, fontSize: 15 }}>
+            Add EMI / Conversion
+          </span>
+        </div>
+        <button type="button" onClick={onCancel} style={{
+          background: 'none', border: 'none',
+          color: 'var(--muted)', cursor: 'pointer',
+          display: 'flex', alignItems: 'center',
+        }}>
+          <X size={18} />
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+        {/* Conversion type */}
+        <div>
+          <label style={labelStyle}>Conversion Type *</label>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+          }}>
+            {CONVERSION_TYPES.map((ct) => {
+              const active = convType === ct.value;
+              return (
+                <button key={ct.value} type="button"
+                  onClick={() => {
+                    setConvType(ct.value);
+                    setCalcResult(null);
+                    setMinSummary(null);
+                  }}
+                  style={{
+                    padding: '10px 8px', borderRadius: 12,
+                    border: `2px solid ${active
+                      ? 'var(--primary)' : 'var(--border)'}`,
+                    background: active
+                      ? 'rgba(99,102,241,0.15)' : 'var(--bg)',
+                    color: active ? 'var(--primary)' : 'var(--text)',
+                    cursor: 'pointer', textAlign: 'left',
+                  }}
+                >
+                  <div style={{ fontSize: 16, marginBottom: 3 }}>
+                    {ct.icon}
                   </div>
-
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => openEditModal(pm)}
-                      style={{
-                        padding: 6, borderRadius: 8, border: 'none',
-                        background: 'var(--bg)', cursor: 'pointer',
-                        color: 'var(--muted)',
-                      }} title="Edit">
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      onClick={() =>
-                        setExpandedCard(expandedCard === pm.id ? null : pm.id!)
-                      }
-                      style={{
-                        padding: 6, borderRadius: 8, border: 'none',
-                        background: 'var(--bg)', cursor: 'pointer',
-                        color: 'var(--muted)',
-                      }}>
-                      {expandedCard === pm.id
-                        ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
-                    {!pm.isCashDefault && (
-                      <button onClick={() => handleDelete(pm)}
-                        style={{
-                          padding: 6, borderRadius: 8, border: 'none',
-                          background: 'var(--bg)', cursor: 'pointer',
-                          color: 'var(--muted)',
-                        }} title="Delete">
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Live Balance */}
-                {hasBalance && (
                   <div style={{
-                    display: 'flex', alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 12px',
-                    background: (currentBal ?? 0) >= 0
-                      ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
-                    border: `1px solid ${(currentBal ?? 0) >= 0
-                      ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
-                    borderRadius: 10, marginBottom: 10,
+                    fontWeight: 800, fontSize: 13,
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Wallet size={14} style={{
-                        color: (currentBal ?? 0) >= 0
-                          ? 'var(--success)' : 'var(--danger)',
-                      }} />
-                      <span style={{
-                        fontSize: 12, color: 'var(--muted)', fontWeight: 600,
-                      }}>
-                        Current Balance
-                      </span>
-                    </div>
-                    <span style={{
-                      fontSize: 15, fontWeight: 900,
-                      color: (currentBal ?? 0) >= 0
-                        ? 'var(--success)' : 'var(--danger)',
-                    }}>
-                      {formatBalance(pm, currentBal ?? 0)}
-                    </span>
+                    {ct.label}
                   </div>
-                )}
-
-                {/* Type-specific details */}
-                {pm.type === 'credit' && (
-                  <div>
-                    <div className="country-row">
-                      <span>Credit Limit</span>
-                      <strong>AED {pm.creditLimit?.toLocaleString()}</strong>
-                    </div>
-                    <div className="country-row">
-                      <span>Statement Date</span>
-                      <strong>{pm.statementDate}th every month</strong>
-                    </div>
-                    <div className="country-row">
-                      <span>Payment Due</span>
-                      <strong style={{ color: 'var(--warning)' }}>
-                        {pm.paymentDueDate}th of next month
-                      </strong>
-                    </div>
+                  <div style={{
+                    fontSize: 11, color: active
+                      ? 'var(--primary)' : 'var(--muted)',
+                    marginTop: 2,
+                  }}>
+                    {ct.desc}
                   </div>
-                )}
-
-                {pm.type === 'debit' && (
-                  <div>
-                    <div className="country-row">
-                      <span>Opening Balance</span>
-                      <strong style={{ color: 'var(--muted)' }}>
-                        {currencySymbol(pm)}{' '}
-                        {(openingBal?.perMethod[pm.id!] ?? 0).toLocaleString()}
-                      </strong>
-                    </div>
-                  </div>
-                )}
-
-                {pm.type === 'tabby' && (
-                  <div>
-                    <div className="country-row">
-                      <span>Tabby Type</span>
-                      <strong style={{
-                        color: pm.isTabbyPro ? 'var(--primary)' : 'var(--muted)',
-                      }}>
-                        {pm.isTabbyPro
-                          ? '⚡ Pro — 4-month EMI split'
-                          : '💳 Regular — full payment'}
-                      </strong>
-                    </div>
-                    <div className="country-row">
-                      <span>Statement Date</span>
-                      <strong>{pm.tabbyStatementDate}th every month</strong>
-                    </div>
-                    <div className="country-row">
-                      <span>Payment Due</span>
-                      <strong style={{ color: 'var(--warning)' }}>
-                        {pm.tabbyPaymentDueDate}th of next month
-                      </strong>
-                    </div>
-
-                    {expandedCard === pm.id && (
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{
-                          fontSize: 13, fontWeight: 700,
-                          marginBottom: 8, color: 'var(--warning)',
-                        }}>
-                          🛍️ Active Tabby Purchases
-                        </div>
-                        {getTabbyEMIsForCard(pm.id!).length === 0 ? (
-                          <p style={{
-                            fontSize: 12, color: 'var(--muted)',
-                            textAlign: 'center', padding: '12px 0',
-                          }}>
-                            No active Tabby purchases
-                          </p>
-                        ) : (
-                          getTabbyEMIsForCard(pm.id!).map((emi) => (
-                            <div key={emi.id} style={{
-                              marginBottom: 8, padding: 10,
-                              background: 'rgba(245,158,11,0.08)',
-                              borderRadius: 10,
-                            }}>
-                              <div style={{
-                                fontWeight: 700, fontSize: 13, marginBottom: 6,
-                              }}>
-                                {emi.itemName} — AED {emi.totalAmount}
-                              </div>
-                              {emi.emis.map((e) => (
-                                <div key={e.number} style={{
-                                  display: 'flex', justifyContent: 'space-between',
-                                  fontSize: 12, padding: '4px 0',
-                                  color: e.paid ? 'var(--success)' : 'var(--muted)',
-                                }}>
-                                  <span>
-                                    {e.paid ? '✅' : '⏳'} EMI {e.number} · {e.dueDate}
-                                  </span>
-                                  <strong>AED {e.amount.toFixed(2)}</strong>
-                                </div>
-                              ))}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {pm.type === 'cash' && (
-                  <div>
-                    <div className="country-row">
-                      <span>Monthly Envelope</span>
-                      <strong>
-                        {currencySymbol(pm)}{' '}
-                        {pm.cashEnvelopeAmount?.toLocaleString() || '0'}
-                      </strong>
-                    </div>
-                    {pm.isCashDefault && (
-                      <div style={{
-                        marginTop: 8, fontSize: 11,
-                        color: 'var(--muted)', lineHeight: 1.5,
-                      }}>
-                        💡 Default cash account — tracks all cash transactions
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {pm.type === 'upi' && (
-                  <div>
-                    <div className="country-row">
-                      <span>Type</span>
-                      <strong>📱 UPI Payment</strong>
-                    </div>
-                  </div>
-                )}
-
-                {pm.type === 'custom' && (
-                  <div>
-                    <div className="country-row">
-                      <span>Type</span>
-                      <strong>Custom Payment Method</strong>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      )}
 
-      {/* ── Add / Edit Modal ── */}
-      {showModal && (
+        {/* Description */}
+        <div>
+          <label style={labelStyle}>Description *</label>
+          <input
+            type="text"
+            placeholder="e.g. Balance Transfer, iPhone EMI"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+
+        {/* Principal */}
+        <div>
+          <label style={labelStyle}>
+            {isMin ? 'Outstanding Balance *' : 'Principal Amount *'}
+          </label>
+          <input
+            type="number" inputMode="decimal"
+            placeholder={country === 'India' ? '50000' : '12000'}
+            value={principal}
+            onChange={(e) => { setPrincipal(e.target.value); setCalcResult(null); }}
+            style={inputStyle}
+          />
+        </div>
+
+        {/* Rate — for non-zero */}
+        {(needsRate || isMin) && (
+          <div>
+            <label style={labelStyle}>Monthly Interest Rate (%) *</label>
+            <input
+              type="number" inputMode="decimal"
+              placeholder="e.g. 3.5"
+              value={rate}
+              onChange={(e) => { setRate(e.target.value); setCalcResult(null); }}
+              style={inputStyle}
+            />
+            <div style={{
+              fontSize: 11, color: 'var(--muted)', marginTop: 4,
+            }}>
+              UAE banks usually 2–4% per month on outstanding
+            </div>
+          </div>
+        )}
+
+        {/* Tenure — not for min payment */}
+        {!isMin && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
+          }}>
+            <div>
+              <label style={labelStyle}>Tenure (months) *</label>
+              <input
+                type="number" inputMode="numeric" placeholder="12"
+                value={tenure}
+                onChange={(e) => { setTenure(e.target.value); setCalcResult(null); }}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Months Already Paid</label>
+              <input
+                type="number" inputMode="numeric" placeholder="0"
+                value={paidMonths}
+                onChange={(e) => setPaidMonths(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Minimum due — only for min payment */}
+        {isMin && (
+          <div>
+            <label style={labelStyle}>Minimum Monthly Due *</label>
+            <input
+              type="number" inputMode="decimal"
+              placeholder={country === 'India' ? '2000' : '500'}
+              value={minimumDue}
+              onChange={(e) => { setMinimumDue(e.target.value); setCalcResult(null); }}
+              style={inputStyle}
+            />
+          </div>
+        )}
+
+        {/* Start date */}
+        <div>
+          <label style={labelStyle}>Start Month</label>
+          <input
+            type="month" value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={inputStyle}
+          />
+        </div>
+
+        {/* Calculate button */}
+        <button
+          type="button" onClick={calculate}
+          style={{
+            padding: '12px', borderRadius: 12,
+            border: '2px solid var(--primary)',
+            background: 'rgba(99,102,241,0.1)',
+            color: 'var(--primary)', fontWeight: 800,
+            fontSize: 14, cursor: 'pointer',
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'center', gap: 8,
+          }}
+        >
+          <Calculator size={16} /> Calculate
+        </button>
+
+        {/* Calculation result */}
+        {calcResult && (
+          <div style={{
+            background: 'rgba(99,102,241,0.08)',
+            border: '1px solid rgba(99,102,241,0.25)',
+            borderRadius: 14, padding: '14px 16px',
+          }}>
+            <div style={{
+              fontSize: 12, fontWeight: 800,
+              color: 'var(--primary)', marginBottom: 10,
+              letterSpacing: 0.5,
+            }}>
+              📊 CALCULATION RESULT
+            </div>
+
+            <InfoRow
+              label="Monthly Payment"
+              value={fmt(calcResult.monthlyAmount, country)}
+              color="var(--primary)" bold
+            />
+            <InfoRow
+              label="Total Payable"
+              value={fmt(calcResult.totalPayable, country)}
+            />
+            {calcResult.totalInterest > 0 && (
+              <InfoRow
+                label="Total Interest Cost"
+                value={fmt(calcResult.totalInterest, country)}
+                color="var(--danger)"
+              />
+            )}
+            {isMin && minSummary && (
+              <>
+                <InfoRow
+                  label="Months to Pay Off"
+                  value={`~${minSummary.monthsToPayoff} months`}
+                  color="var(--warning)"
+                />
+                <div style={{
+                  marginTop: 8, padding: '8px 10px',
+                  borderRadius: 10,
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.2)',
+                  fontSize: 12, color: 'var(--danger)',
+                }}>
+                  ⚠️ Paying only minimum is very costly!
+                  Consider increasing payment to reduce interest.
+                </div>
+              </>
+            )}
+            {calcResult.totalInterest === 0 && (
+              <div style={{
+                marginTop: 8, padding: '8px 10px',
+                borderRadius: 10,
+                background: 'rgba(16,185,129,0.08)',
+                border: '1px solid rgba(16,185,129,0.2)',
+                fontSize: 12, color: 'var(--success)',
+              }}>
+                ✅ 0% plan — no interest cost!
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Save */}
+        <button
+          type="button" onClick={handleSave}
+          disabled={!calcResult}
+          style={{
+            padding: '13px', borderRadius: 12,
+            border: 'none',
+            background: calcResult ? 'var(--primary)' : 'var(--border)',
+            color: calcResult ? '#fff' : 'var(--muted)',
+            fontWeight: 900, fontSize: 15,
+            cursor: calcResult ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Save EMI / Conversion
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+
+export default function Cards({ user }: { user: User }) {
+  const [methods,      setMethods]      = useState<PaymentMethod[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [openingBal,   setOpeningBal]   = useState<OpeningBalance | null>(null);
+  const [expanded,     setExpanded]     = useState<Record<string, boolean>>({});
+  const [showForm,     setShowForm]     = useState(false);
+  const [editTarget,   setEditTarget]   = useState<PaymentMethod | null>(null);
+  const [showEMIFor,   setShowEMIFor]   = useState<string | null>(null);
+  const [saving,       setSaving]       = useState(false);
+  const [deleting,     setDeleting]     = useState<string | null>(null);
+
+  // form state
+  const [fName,          setFName]          = useState('');
+  const [fType,          setFType]          = useState<CardType>('debit');
+  const [fCountry,       setFCountry]       = useState<Country>('UAE');
+  const [fBank,          setFBank]          = useState('');
+  const [fColor,         setFColor]         = useState(COLORS[0]);
+  const [fCreditLimit,   setFCreditLimit]   = useState('');
+  const [fOpeningUsed,   setFOpeningUsed]   = useState('');
+  const [fStatementDate, setFStatementDate] = useState('');
+  const [fDueDate,       setFDueDate]       = useState('');
+
+  // ── Listeners ────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsubs: (() => void)[] = [];
+
+    unsubs.push(onSnapshot(
+      query(collection(db, 'paymentMethods'), where('userId', '==', user.uid)),
+      (snap) => {
+        setMethods(snap.docs.map((d) => ({
+          id: d.id, ...d.data(),
+          emis: (d.data().emis ?? []) as EMI[],
+        } as PaymentMethod)));
+      },
+    ));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, 'transactions'), where('userId', '==', user.uid)),
+      (snap) => {
+        setTransactions(
+          snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction))
+        );
+      },
+    ));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, 'openingBalances'), where('userId', '==', user.uid)),
+      (snap) => {
+        if (!snap.empty) {
+          const data = snap.docs[0].data() as OpeningBalance;
+          setOpeningBal({
+            perMethod: data.perMethod ?? {},
+            asOf: data.asOf ?? '1970-01-01',
+          });
+        }
+      },
+    ));
+
+    return () => unsubs.forEach((u) => u());
+  }, [user.uid]);
+
+  // ── Balance calculation ───────────────────────────────────────────────────────
+
+  const getMethodBalance = (pm: PaymentMethod): number => {
+    const asOf = openingBal?.asOf ?? '1970-01-01';
+    const txs  = transactions.filter((t) => t.date >= asOf);
+
+    if (pm.type === 'credit') {
+      const openingUsed = pm.openingUsed ?? 0;
+      return txs.reduce((sum, tx) => {
+        if (tx.type === 'expense' && tx.paymentMethodId === pm.id)
+          return sum + tx.amount;
+        if (tx.type === 'income'  && tx.paymentMethodId === pm.id)
+          return sum - tx.amount;
+        if (tx.type === 'transfer') {
+          if (tx.toMethod   === pm.id) return sum - tx.amount;
+          if (tx.fromMethod === pm.id) return sum + tx.amount;
+        }
+        return sum;
+      }, openingUsed);
+    }
+
+    const opening = openingBal?.perMethod?.[pm.id] ?? 0;
+    return txs.reduce((sum, tx) => {
+      if (tx.type === 'income'  && tx.paymentMethodId === pm.id)
+        return sum + tx.amount;
+      if (tx.type === 'expense' && tx.paymentMethodId === pm.id)
+        return sum - tx.amount;
+      if (tx.type === 'transfer') {
+        if (tx.fromMethod === pm.id) return sum - tx.amount;
+        if (tx.toMethod   === pm.id) return sum + tx.amount;
+      }
+      return sum;
+    }, opening);
+  };
+
+  // ── Form helpers ──────────────────────────────────────────────────────────────
+
+  const resetForm = () => {
+    setFName(''); setFType('debit'); setFCountry('UAE');
+    setFBank(''); setFColor(COLORS[0]); setFCreditLimit('');
+    setFOpeningUsed(''); setFStatementDate(''); setFDueDate('');
+    setEditTarget(null);
+  };
+
+  const openEdit = (pm: PaymentMethod) => {
+    setEditTarget(pm);
+    setFName(pm.name);
+    setFType(pm.type);
+    setFCountry(pm.country);
+    setFBank(pm.bankName ?? '');
+    setFColor(pm.color ?? COLORS[0]);
+    setFCreditLimit(pm.creditLimit != null ? String(pm.creditLimit) : '');
+    setFOpeningUsed(pm.openingUsed != null ? String(pm.openingUsed) : '');
+    setFStatementDate(pm.statementDate != null ? String(pm.statementDate) : '');
+    setFDueDate(pm.dueDate != null ? String(pm.dueDate) : '');
+    setShowForm(true);
+  };
+
+  const saveMethod = async () => {
+    if (!fName.trim()) { toast.error('Enter a name'); return; }
+    setSaving(true);
+    try {
+      const data: Record<string, unknown> = {
+        userId: user.uid,
+        name: fName.trim(),
+        type: fType,
+        country: fCountry,
+        bankName:      fBank          || null,
+        color:         fColor,
+        isCashDefault: fType === 'cash',
+        creditLimit:   fType === 'credit' && fCreditLimit
+          ? parseFloat(fCreditLimit) : null,
+        openingUsed:   fType === 'credit' && fOpeningUsed
+          ? parseFloat(fOpeningUsed) : null,
+        statementDate: fType === 'credit' && fStatementDate
+          ? parseInt(fStatementDate) : null,
+        dueDate:       fType === 'credit' && fDueDate
+          ? parseInt(fDueDate) : null,
+        updatedAt: Timestamp.now(),
+      };
+
+      if (editTarget) {
+        await updateDoc(doc(db, 'paymentMethods', editTarget.id), data);
+        toast.success('Updated!');
+      } else {
+        await addDoc(collection(db, 'paymentMethods'), {
+          ...data, emis: [], createdAt: Timestamp.now(),
+        });
+        toast.success('Account added!');
+      }
+      setShowForm(false);
+      resetForm();
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteMethod = async (id: string) => {
+    if (!window.confirm('Delete this account?')) return;
+    setDeleting(id);
+    try {
+      await deleteDoc(doc(db, 'paymentMethods', id));
+      toast.success('Deleted');
+    } catch { toast.error('Failed'); }
+    finally   { setDeleting(null); }
+  };
+
+  // ── EMI save / remove ─────────────────────────────────────────────────────────
+
+  const saveEMI = async (pm: PaymentMethod, emi: EMI) => {
+    const updated = [...(pm.emis ?? []), emi];
+    await updateDoc(doc(db, 'paymentMethods', pm.id), { emis: updated });
+    toast.success('EMI saved!');
+    setShowEMIFor(null);
+  };
+
+  const removeEMI = async (pm: PaymentMethod, emiId: string) => {
+    const updated = pm.emis.filter((e) => e.id !== emiId);
+    await updateDoc(doc(db, 'paymentMethods', pm.id), { emis: updated });
+    toast.success('EMI removed');
+  };
+
+  // ── Grouping ──────────────────────────────────────────────────────────────────
+
+  const banks        = Array.from(new Set(
+    methods.filter((m) => m.bankName).map((m) => m.bankName!)
+  ));
+  const cashMethods  = methods.filter((m) => m.type === 'cash');
+  const otherMethods = methods.filter(
+    (m) => m.type !== 'cash' && !m.bankName
+  );
+
+  // ── Summary totals ────────────────────────────────────────────────────────────
+
+  const uaeLiquid = methods
+    .filter((m) => m.country !== 'India' && m.type !== 'credit')
+    .reduce((s, m) => s + getMethodBalance(m), 0);
+
+  const indiaLiquid = methods
+    .filter((m) => m.country === 'India' && m.type !== 'credit')
+    .reduce((s, m) => s + getMethodBalance(m), 0);
+
+  const creditCards     = methods.filter((m) => m.type === 'credit');
+  const totalUsed       = creditCards.reduce((s, m) => s + getMethodBalance(m), 0);
+  const totalLimit      = creditCards.reduce((s, m) => s + (m.creditLimit ?? 0), 0);
+  const totalMonthlyEMI = creditCards.reduce(
+    (s, m) => s + m.emis.reduce((es, e) => es + e.monthlyAmount, 0), 0
+  );
+
+  // ── Card renderer ─────────────────────────────────────────────────────────────
+
+  const renderCard = (pm: PaymentMethod) => {
+    const isCredit   = pm.type === 'credit';
+    const balance    = getMethodBalance(pm);
+    const limit      = pm.creditLimit ?? 0;
+    const available  = limit - balance;
+    const country    = pm.country === 'India' ? 'India' : 'UAE';
+    const isExpanded = expanded[pm.id] ?? false;
+    const typeInfo   = CARD_TYPES.find((c) => c.value === pm.type);
+
+    const totalEMIMonthly = pm.emis.reduce(
+      (s, e) => s + e.monthlyAmount, 0
+    );
+
+    return (
+      <div key={pm.id} style={{
+        background: 'var(--bg)',
+        border: `1.5px solid ${(pm.color ?? '#6366f1')}35`,
+        borderRadius: 16, overflow: 'hidden', marginBottom: 10,
+      }}>
+        {/* ── Card header ── */}
         <div
           style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid', placeItems: 'center',
-            zIndex: 200, padding: 16,
+            padding: '14px 16px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 12,
           }}
-          onClick={() => setShowModal(false)}
+          onClick={() =>
+            setExpanded((p) => ({ ...p, [pm.id]: !p[pm.id] }))
+          }
         >
-          <div
-            className="card"
+          <div style={{
+            width: 42, height: 42, borderRadius: 13, flexShrink: 0,
+            background: (pm.color ?? '#6366f1') + '22',
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: 22,
+          }}>
+            {typeInfo?.icon ?? '💳'}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontWeight: 800, fontSize: 15, color: 'var(--text)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {pm.name}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+              {typeInfo?.label}
+              {pm.bankName ? ` · ${pm.bankName}` : ''}
+              {' · '}
+              {pm.country === 'India' ? '🇮🇳' : pm.country === 'UAE' ? '🇦🇪' : '🌐'}
+              {isCredit && pm.emis.length > 0
+                ? ` · ${pm.emis.length} EMI`
+                : ''}
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            {isCredit ? (
+              <>
+                <div style={{
+                  fontSize: 14, fontWeight: 900,
+                  color: balance > limit * 0.8
+                    ? 'var(--danger)' : 'var(--warning)',
+                }}>
+                  {fmt(balance, country)} used
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  of {fmt(limit, country)}
+                </div>
+              </>
+            ) : (
+              <div style={{
+                fontSize: 14, fontWeight: 900,
+                color: balance >= 0
+                  ? pm.color ?? 'var(--success)' : 'var(--danger)',
+              }}>
+                {balance < 0 ? '-' : ''}{fmt(Math.abs(balance), country)}
+              </div>
+            )}
+          </div>
+
+          <div style={{ color: 'var(--muted)', flexShrink: 0 }}>
+            {isExpanded
+              ? <ChevronUp size={18} />
+              : <ChevronDown size={18} />}
+          </div>
+        </div>
+
+        {/* Utilization — credit always visible */}
+        {isCredit && limit > 0 && (
+          <div style={{ padding: '0 16px 10px' }}>
+            <UtilizationBar used={balance} limit={limit} />
+          </div>
+        )}
+
+        {/* Due date — credit always visible */}
+        {isCredit && pm.dueDate && (
+          <div style={{ padding: '0 16px 12px' }}>
+            <DueBadge
+              dueDate={pm.dueDate}
+              statementDate={pm.statementDate}
+            />
+          </div>
+        )}
+
+        {/* ── Expanded ── */}
+        {isExpanded && (
+          <div style={{
+            borderTop: '1px solid var(--border)', padding: '14px 16px',
+          }}>
+
+            {/* Credit detail grid */}
+            {isCredit && (
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                gap: 8, marginBottom: 14,
+              }}>
+                {[
+                  { label: 'Limit',     value: fmt(limit, country),     color: 'var(--muted)'   },
+                  { label: 'Used',      value: fmt(balance, country),   color: 'var(--warning)' },
+                  { label: 'Available', value: fmt(Math.max(available, 0), country),
+                    color: available > 0 ? 'var(--success)' : 'var(--danger)' },
+                ].map((item) => (
+                  <div key={item.label} style={{
+                    background: 'var(--card)', borderRadius: 12,
+                    padding: '10px', border: '1px solid var(--border)',
+                    textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700 }}>
+                      {item.label}
+                    </div>
+                    <div style={{
+                      fontSize: 13, fontWeight: 900,
+                      color: item.color, marginTop: 4,
+                    }}>
+                      {item.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* EMIs section — credit only */}
+            {isCredit && (
+              <div style={{ marginBottom: 14 }}>
+                {/* EMI header */}
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', marginBottom: 10,
+                }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 800,
+                    color: 'var(--muted)', letterSpacing: 0.5,
+                  }}>
+                    💳 EMI / CONVERSIONS
+                    {pm.emis.length > 0 && (
+                      <span style={{
+                        marginLeft: 8, padding: '2px 8px',
+                        borderRadius: 99, background: 'rgba(99,102,241,0.15)',
+                        color: 'var(--primary)', fontSize: 11,
+                      }}>
+                        {fmt(totalEMIMonthly, country)}/mo total
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowEMIFor(showEMIFor === pm.id ? null : pm.id)
+                    }
+                    style={{
+                      padding: '6px 12px', borderRadius: 9,
+                      border: '1px solid var(--primary)',
+                      background: 'rgba(99,102,241,0.1)',
+                      color: 'var(--primary)', fontSize: 12,
+                      fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}
+                  >
+                    <Plus size={13} /> Add EMI
+                  </button>
+                </div>
+
+                {/* EMI form */}
+                {showEMIFor === pm.id && (
+                  <EMIForm
+                    pm={pm}
+                    onSave={(emi) => saveEMI(pm, emi)}
+                    onCancel={() => setShowEMIFor(null)}
+                  />
+                )}
+
+                {/* EMI list */}
+                {pm.emis.length === 0 && showEMIFor !== pm.id ? (
+                  <div style={{
+                    fontSize: 13, color: 'var(--muted)',
+                    textAlign: 'center', padding: '12px 0',
+                  }}>
+                    No EMIs yet — tap "Add EMI" to track conversions
+                  </div>
+                ) : (
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 8,
+                  }}>
+                    {pm.emis.map((emi) => (
+                      <EMICard
+                        key={emi.id}
+                        emi={emi}
+                        country={country}
+                        onRemove={() => removeEMI(pm, emi.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => openEdit(pm)}
+                style={{
+                  flex: 1, padding: '9px', borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  background: 'var(--card)', color: 'var(--text)',
+                  fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: 6,
+                }}
+              >
+                <Pencil size={14} /> Edit
+              </button>
+              <button type="button"
+                onClick={() => deleteMethod(pm.id)}
+                disabled={deleting === pm.id}
+                style={{
+                  padding: '9px 18px', borderRadius: 10,
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  background: 'rgba(239,68,68,0.08)',
+                  color: 'var(--danger)', fontWeight: 700,
+                  fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  opacity: deleting === pm.id ? 0.5 : 1,
+                }}
+              >
+                <Trash2 size={14} />
+                {deleting === pm.id ? '...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Section helper ────────────────────────────────────────────────────────────
+
+  const renderSection = (
+    title: string, icon: React.ReactNode,
+    items: PaymentMethod[], color: string,
+  ) => {
+    if (items.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 22 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center',
+          gap: 8, marginBottom: 10,
+        }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 9,
+            background: `${color}20`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {icon}
+          </div>
+          <span style={{
+            fontSize: 12, fontWeight: 900,
+            color: 'var(--muted)', letterSpacing: 0.5,
+          }}>
+            {title}
+          </span>
+        </div>
+        {items.map((pm) => renderCard(pm))}
+      </div>
+    );
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+
+  return (
+    <div style={{ padding: '22px 16px 40px', maxWidth: 640, margin: '0 auto' }}>
+
+      {/* Header */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', marginBottom: 20,
+      }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 900, margin: 0 }}>
+            Cards & Accounts
+          </h1>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
+            {methods.length} account{methods.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+        <button type="button" onClick={() => { resetForm(); setShowForm(true); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '10px 18px', borderRadius: 14,
+            background: 'var(--primary)', border: 'none',
+            color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer',
+          }}
+        >
+          <Plus size={18} /> Add
+        </button>
+      </div>
+
+      {/* Summary strip */}
+      {methods.length > 0 && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: creditCards.length > 0 ? '1fr 1fr 1fr' : '1fr 1fr',
+          gap: 10, marginBottom: 24,
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05))',
+            border: '1px solid rgba(16,185,129,0.3)',
+            borderRadius: 16, padding: '14px',
+          }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>
+              🇦🇪 UAE Liquid
+            </div>
+            <div style={{
+              fontSize: 16, fontWeight: 900,
+              color: 'var(--success)', marginTop: 4,
+            }}>
+              {fmtAED(uaeLiquid)}
+            </div>
+          </div>
+
+          <div style={{
+            background: 'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05))',
+            border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 16, padding: '14px',
+          }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>
+              🇮🇳 India Liquid
+            </div>
+            <div style={{
+              fontSize: 16, fontWeight: 900,
+              color: 'var(--warning)', marginTop: 4,
+            }}>
+              {fmtINR(indiaLiquid)}
+            </div>
+          </div>
+
+          {creditCards.length > 0 && (
+            <div style={{
+              background: 'linear-gradient(135deg,rgba(239,68,68,0.15),rgba(239,68,68,0.05))',
+              border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: 16, padding: '14px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700 }}>
+                💳 Credit Used
+              </div>
+              <div style={{
+                fontSize: 16, fontWeight: 900,
+                color: 'var(--danger)', marginTop: 4,
+              }}>
+                {fmtAED(totalUsed)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                of {fmtAED(totalLimit)}
+              </div>
+              {totalMonthlyEMI > 0 && (
+                <div style={{
+                  fontSize: 11, color: 'var(--warning)', marginTop: 4,
+                  fontWeight: 700,
+                }}>
+                  EMI: {fmtAED(totalMonthlyEMI)}/mo
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {methods.length === 0 && (
+        <div style={{
+          textAlign: 'center', padding: '60px 20px',
+          background: 'var(--card)', borderRadius: 20,
+          border: '1px solid var(--border)',
+        }}>
+          <CreditCard size={48} style={{ color: 'var(--muted)', marginBottom: 12 }} />
+          <div style={{ fontWeight: 800, fontSize: 18 }}>No accounts yet</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 6 }}>
+            Add your cards and bank accounts
+          </div>
+          <button type="button"
+            onClick={() => { resetForm(); setShowForm(true); }}
             style={{
-              width: '100%', maxWidth: 520,
-              maxHeight: '90vh', overflowY: 'auto',
+              marginTop: 20, padding: '12px 28px', borderRadius: 14,
+              background: 'var(--primary)', border: 'none',
+              color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer',
             }}
-            onClick={(e) => e.stopPropagation()}
           >
+            + Add Account
+          </button>
+        </div>
+      )}
+
+      {/* Banks */}
+      {banks.map((bank) => {
+        const bm   = methods.filter((m) => m.bankName === bank);
+        const flag = bm[0]?.country === 'India' ? '🇮🇳'
+                   : bm[0]?.country === 'UAE'   ? '🇦🇪' : '🌐';
+        return (
+          <div key={bank} style={{ marginBottom: 22 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              gap: 8, marginBottom: 10,
+            }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: 9,
+                background: 'rgba(99,102,241,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Building2 size={16} color="var(--primary)" />
+              </div>
+              <span style={{
+                fontSize: 14, fontWeight: 900, color: 'var(--text)',
+              }}>
+                {flag} {bank}
+              </span>
+            </div>
+            {bm.map((pm) => renderCard(pm))}
+          </div>
+        );
+      })}
+
+      {renderSection(
+        'CASH',
+        <Wallet size={16} color="var(--success)" />,
+        cashMethods, '#10b981',
+      )}
+      {renderSection(
+        'OTHERS',
+        <Smartphone size={16} color="var(--primary)" />,
+        otherMethods, '#6366f1',
+      )}
+
+      {/* ── Add/Edit Modal ── */}
+      {showForm && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) { setShowForm(false); resetForm(); }
+          }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'flex-end',
+            justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div style={{
+            background: 'var(--card)',
+            borderRadius: '26px 26px 0 0',
+            padding: '24px 20px 44px',
+            width: '100%', maxWidth: 520,
+            maxHeight: '90vh', overflowY: 'auto',
+          }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between',
               alignItems: 'center', marginBottom: 20,
             }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>
-                {editingMethod ? 'Edit Payment Method' : 'Add Payment Method'}
-              </h2>
-              <button onClick={() => setShowModal(false)}
+              <div style={{ fontWeight: 900, fontSize: 20 }}>
+                {editTarget ? 'Edit Account' : 'Add Account'}
+              </div>
+              <button type="button"
+                onClick={() => { setShowForm(false); resetForm(); }}
                 style={{
-                  padding: 8, borderRadius: 10, border: 'none',
-                  background: 'var(--bg)', cursor: 'pointer',
-                }}>
-                <X size={18} />
+                  background: 'var(--bg)', border: 'none',
+                  borderRadius: 10, padding: 8,
+                  cursor: 'pointer', color: 'var(--text)',
+                  display: 'flex', alignItems: 'center',
+                }}
+              >
+                <X size={20} />
               </button>
             </div>
 
-            {/* Type selector */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{
-                fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                marginBottom: 8, display: 'block',
-              }}>
-                Payment Method Type
-              </label>
-              <div style={{
-                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
-              }}>
-                {(Object.keys(cardTypeConfig) as CardType[]).map((type) => (
-                  <button key={type}
-                    onClick={() => !editingMethod && setCardType(type)}
-                    disabled={!!editingMethod}
-                    style={{
-                      padding: '10px 8px', borderRadius: 12,
-                      border: `2px solid ${
-                        cardType === type ? 'var(--primary)' : 'var(--border)'
-                      }`,
-                      background: cardType === type
-                        ? 'var(--primary-soft)' : 'var(--bg)',
-                      cursor: editingMethod ? 'not-allowed' : 'pointer',
-                      opacity: editingMethod && cardType !== type ? 0.5 : 1,
-                      fontSize: 12, fontWeight: 600, color: 'var(--text)',
-                      display: 'flex', flexDirection: 'column',
-                      alignItems: 'center', gap: 4,
-                    }}
-                  >
-                    <span style={{ fontSize: 20 }}>
-                      {cardTypeConfig[type].icon}
-                    </span>
-                    {cardTypeConfig[type].label}
-                  </button>
-                ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+              {/* Type */}
+              <div>
+                <label style={labelStyle}>Account Type *</label>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8,
+                }}>
+                  {CARD_TYPES.map((ct) => {
+                    const active = fType === ct.value;
+                    return (
+                      <button key={ct.value} type="button"
+                        onClick={() => setFType(ct.value)}
+                        style={{
+                          padding: '10px 6px', borderRadius: 12,
+                          border: `2px solid ${active
+                            ? 'var(--primary)' : 'var(--border)'}`,
+                          background: active ? 'var(--primary)' : 'var(--card)',
+                          color: active ? '#fff' : 'var(--text)',
+                          fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                          display: 'flex', flexDirection: 'column',
+                          alignItems: 'center', gap: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 20 }}>{ct.icon}</span>
+                        {ct.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              {editingMethod && (
-                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
-                  Type cannot be changed after creation.
+
+              {/* Country */}
+              <div>
+                <label style={labelStyle}>Country *</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {COUNTRIES.map((c) => {
+                    const active = fCountry === c.value;
+                    return (
+                      <button key={c.value} type="button"
+                        onClick={() => { setFCountry(c.value); setFBank(''); }}
+                        style={{
+                          flex: 1, padding: '10px', borderRadius: 12,
+                          border: `2px solid ${active
+                            ? 'var(--primary)' : 'var(--border)'}`,
+                          background: active ? 'var(--primary)' : 'var(--card)',
+                          color: active ? '#fff' : 'var(--text)',
+                          fontWeight: 700, cursor: 'pointer', fontSize: 14,
+                        }}
+                      >
+                        {c.flag} {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Bank */}
+              {(fType === 'credit' || fType === 'debit') && (
+                <div>
+                  <label style={labelStyle}>Bank</label>
+                  <select
+                    value={fBank}
+                    onChange={(e) => setFBank(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="">Select bank (optional)</option>
+                    {(fCountry === 'India' ? INDIA_BANKS : UAE_BANKS).map(
+                      (b) => <option key={b} value={b}>{b}</option>
+                    )}
+                  </select>
                 </div>
               )}
-            </div>
 
-            {/* Country */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{
-                fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                marginBottom: 8, display: 'block',
-              }}>
-                Country
-              </label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['UAE', 'India', 'Both'] as Country[]).map((c) => (
-                  <button key={c}
-                    className={`btn ${country === c ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCountry(c)}
-                    style={{ flex: 1, fontSize: 13 }}>
-                    {c === 'UAE' ? '🇦🇪 UAE'
-                      : c === 'India' ? '🇮🇳 India' : '🌍 Both'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Name */}
-            {cardType !== 'cash' && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                  marginBottom: 8, display: 'block',
-                }}>
-                  {cardType === 'custom' ? 'Method Name' : 'Card Name'}
-                </label>
-                <input type="text"
+              {/* Name */}
+              <div>
+                <label style={labelStyle}>Account Name *</label>
+                <input
+                  type="text"
                   placeholder={
-                    cardType === 'credit' ? 'e.g. ENBD Credit Card'
-                    : cardType === 'debit' ? 'e.g. FAB Debit Card'
-                    : cardType === 'tabby' ? 'e.g. Tabby Card'
-                    : cardType === 'upi'   ? 'e.g. Google Pay'
-                    : 'Custom payment method name'
+                    fType === 'credit' ? 'e.g. ENBD Credit Card'
+                    : fType === 'cash' ? 'e.g. Cash UAE'
+                    : 'e.g. ENBD Debit'
                   }
-                  value={cardType === 'custom' ? customName : cardName}
-                  onChange={(e) =>
-                    cardType === 'custom'
-                      ? setCustomName(e.target.value)
-                      : setCardName(e.target.value)
-                  }
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 12,
-                    border: '1px solid var(--border)', background: 'var(--bg)',
-                    color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                  }}
+                  value={fName}
+                  onChange={(e) => setFName(e.target.value)}
+                  style={inputStyle}
                 />
               </div>
-            )}
 
-            {/* Bank name */}
-            {(cardType === 'credit' || cardType === 'debit') && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                  marginBottom: 8, display: 'block',
-                }}>
-                  Bank Name
-                </label>
-                <input type="text"
-                  placeholder="e.g. Emirates NBD, FAB, ADCB"
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 12,
-                    border: '1px solid var(--border)', background: 'var(--bg)',
-                    color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Credit fields */}
-            {cardType === 'credit' && (
-              <>
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{
-                    fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                    marginBottom: 8, display: 'block',
-                  }}>
-                    Credit Limit (AED)
-                  </label>
-                  <input type="number" placeholder="e.g. 15000"
-                    value={creditLimit}
-                    onChange={(e) => setCreditLimit(e.target.value)}
-                    style={{
-                      width: '100%', padding: '10px 14px', borderRadius: 12,
-                      border: '1px solid var(--border)', background: 'var(--bg)',
-                      color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr',
-                  gap: 12, marginBottom: 16,
-                }}>
-                  <div>
-                    <label style={{
-                      fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                      marginBottom: 8, display: 'block',
-                    }}>
-                      Statement Date
-                    </label>
-                    <input type="number" min="1" max="31"
-                      value={statementDate}
-                      onChange={(e) => setStatementDate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 12,
-                        border: '1px solid var(--border)', background: 'var(--bg)',
-                        color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{
-                      fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                      marginBottom: 8, display: 'block',
-                    }}>
-                      Payment Due Date
-                    </label>
-                    <input type="number" min="1" max="31"
-                      value={paymentDueDate}
-                      onChange={(e) => setPaymentDueDate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 12,
-                        border: '1px solid var(--border)', background: 'var(--bg)',
-                        color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                      }}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Debit fields */}
-            {cardType === 'debit' && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                  marginBottom: 8, display: 'block',
-                }}>
-                  Current Balance ({country === 'India' ? '₹' : 'AED'})
-                </label>
-                <input type="number" placeholder="e.g. 5000"
-                  value={currentBalance}
-                  onChange={(e) => setCurrentBalance(e.target.value)}
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 12,
-                    border: '1px solid var(--border)', background: 'var(--bg)',
-                    color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Tabby fields */}
-            {cardType === 'tabby' && (
-              <>
-                <div style={{
-                  marginBottom: 16, padding: 14,
-                  background: 'rgba(245,158,11,0.08)',
-                  borderRadius: 14,
-                  border: '1px solid rgba(245,158,11,0.2)',
-                }}>
+              {/* Credit fields */}
+              {fType === 'credit' && (
+                <>
                   <div style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', gap: 16,
+                    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
                   }}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>
-                        ⚡ Tabby Pro
+                      <label style={labelStyle}>Credit Limit</label>
+                      <input
+                        type="number" placeholder="15000"
+                        value={fCreditLimit}
+                        onChange={(e) => setFCreditLimit(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Opening Used Balance</label>
+                      <input
+                        type="number" placeholder="3200"
+                        value={fOpeningUsed}
+                        onChange={(e) => setFOpeningUsed(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Statement Date</label>
+                      <input
+                        type="number" placeholder="20" min="1" max="31"
+                        value={fStatementDate}
+                        onChange={(e) => setFStatementDate(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Due Date</label>
+                      <input
+                        type="number" placeholder="15" min="1" max="31"
+                        value={fDueDate}
+                        onChange={(e) => setFDueDate(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
+
+                  {fOpeningUsed && fCreditLimit && (
+                    <div style={{
+                      padding: '10px 14px', borderRadius: 12,
+                      background: 'rgba(245,158,11,0.08)',
+                      border: '1px solid rgba(245,158,11,0.2)',
+                      fontSize: 13,
+                    }}>
+                      <div style={{ color: 'var(--warning)', fontWeight: 700 }}>
+                        Opening: {fCountry === 'India' ? '₹' : 'AED '}
+                        {parseFloat(fOpeningUsed || '0').toLocaleString()} used
+                      </div>
+                      <div style={{ color: 'var(--muted)', marginTop: 3, fontSize: 12 }}>
+                        Available:{' '}
+                        {fCountry === 'India' ? '₹' : 'AED '}
+                        {Math.max(
+                          parseFloat(fCreditLimit) - parseFloat(fOpeningUsed), 0
+                        ).toLocaleString()}
                       </div>
                       <div style={{
-                        fontSize: 12, color: 'var(--muted)', marginTop: 4,
+                        color: 'var(--muted)', marginTop: 6, fontSize: 11,
                       }}>
-                        {isTabbyPro
-                          ? '✅ Pro ON — purchases split into 4 monthly EMIs'
-                          : '❌ Pro OFF — pay full amount at once'}
+                        💡 Add EMI details after saving the card
                       </div>
                     </div>
-                    <button
-                      onClick={() => setIsTabbyPro(!isTabbyPro)}
-                      type="button"
+                  )}
+                </>
+              )}
+
+              {/* Color */}
+              <div>
+                <label style={labelStyle}>Color</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {COLORS.map((c) => (
+                    <button key={c} type="button" onClick={() => setFColor(c)}
                       style={{
-                        width: 48, height: 26, borderRadius: 999,
-                        border: 'none',
-                        background: isTabbyPro
-                          ? 'var(--success)' : 'var(--border)',
-                        cursor: 'pointer', position: 'relative', flexShrink: 0,
-                      }}
-                    >
-                      <div style={{
-                        width: 20, height: 20, borderRadius: '50%',
-                        background: 'white', position: 'absolute',
-                        top: 3, left: isTabbyPro ? 25 : 3,
-                        transition: 'all 0.2s',
-                      }} />
-                    </button>
-                  </div>
-                  <div style={{
-                    marginTop: 12, padding: '8px 10px',
-                    background: isTabbyPro
-                      ? 'rgba(16,185,129,0.08)' : 'rgba(99,102,241,0.08)',
-                    borderRadius: 8, fontSize: 12,
-                    color: isTabbyPro ? 'var(--success)' : 'var(--primary)',
-                    lineHeight: 1.5,
-                  }}>
-                    {isTabbyPro
-                      ? '📅 Each purchase auto-split into 4 equal monthly payments'
-                      : '💳 Full purchase amount due in next billing cycle'}
-                  </div>
-                </div>
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr',
-                  gap: 12, marginBottom: 16,
-                }}>
-                  <div>
-                    <label style={{
-                      fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                      marginBottom: 8, display: 'block',
-                    }}>
-                      Statement Date
-                    </label>
-                    <input type="number" min="1" max="31"
-                      value={tabbyStatementDate}
-                      onChange={(e) => setTabbyStatementDate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 12,
-                        border: '1px solid var(--border)', background: 'var(--bg)',
-                        color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
+                        width: 32, height: 32, borderRadius: '50%',
+                        background: c, border: 'none', cursor: 'pointer',
+                        outline: fColor === c ? '3px solid white' : 'none',
+                        outlineOffset: 2,
+                        transform: fColor === c ? 'scale(1.2)' : 'scale(1)',
+                        transition: 'transform 0.15s',
                       }}
                     />
-                  </div>
-                  <div>
-                    <label style={{
-                      fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                      marginBottom: 8, display: 'block',
-                    }}>
-                      Payment Due Date
-                    </label>
-                    <input type="number" min="1" max="31"
-                      value={tabbyPaymentDueDate}
-                      onChange={(e) => setTabbyPaymentDueDate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 12,
-                        border: '1px solid var(--border)', background: 'var(--bg)',
-                        color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                      }}
-                    />
-                  </div>
+                  ))}
                 </div>
-              </>
-            )}
-
-            {/* Cash fields */}
-            {cardType === 'cash' && (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                  marginBottom: 8, display: 'block',
-                }}>
-                  Monthly Cash Envelope ({country === 'India' ? '₹' : 'AED'})
-                </label>
-                <input type="number" placeholder="e.g. 500"
-                  value={cashEnvelopeAmount}
-                  onChange={(e) => setCashEnvelopeAmount(e.target.value)}
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 12,
-                    border: '1px solid var(--border)', background: 'var(--bg)',
-                    color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
-                  }}
-                />
               </div>
-            )}
 
-            {/* Color */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{
-                fontSize: 13, fontWeight: 700, color: 'var(--muted)',
-                marginBottom: 8, display: 'block',
-              }}>
-                Card Color
-              </label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {cardColors.map((color) => (
-                  <button key={color}
-                    onClick={() => setSelectedColor(color)}
-                    style={{
-                      width: 32, height: 32, borderRadius: '50%',
-                      background: color,
-                      border: selectedColor === color
-                        ? '3px solid var(--text)' : '3px solid transparent',
-                      cursor: 'pointer',
-                    }}
-                  />
-                ))}
-              </div>
+              <button type="button" onClick={saveMethod} disabled={saving}
+                style={{
+                  width: '100%', padding: '14px', borderRadius: 14,
+                  border: 'none', background: 'var(--primary)',
+                  color: '#fff', fontWeight: 900, fontSize: 16,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  opacity: saving ? 0.7 : 1, marginTop: 4,
+                }}
+              >
+                {saving ? 'Saving...'
+                  : editTarget ? 'Update Account' : 'Add Account'}
+              </button>
             </div>
-
-            <button className="btn btn-primary"
-              onClick={handleSave} disabled={saving}
-              style={{ width: '100%', padding: '14px', fontSize: 15 }}>
-              {saving
-                ? editingMethod ? 'Updating...' : 'Saving...'
-                : editingMethod ? 'Update Payment Method' : 'Save Payment Method'}
-            </button>
           </div>
         </div>
       )}

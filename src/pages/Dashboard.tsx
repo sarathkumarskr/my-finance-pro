@@ -211,19 +211,78 @@ function SummaryCard({
   );
 }
 
-// ✅ BalanceRow — per-method balance display
+// ✅ UPDATED: BalanceRow handles both standard cards and Credit Cards with Progress Bar
 function BalanceRow({
-  icon, label, sublabel, balance, currency, color, isLast = false,
+  pm, balance, isLast = false,
 }: {
-  icon: string; label: string; sublabel: string;
-  balance: number; currency: 'AED' | 'INR';
-  color: string; isLast?: boolean;
+  pm: PaymentMethod;
+  balance: number;
+  isLast?: boolean;
 }) {
+  const isCredit = pm.type === 'credit';
+  const currency = pm.country === 'India' ? 'INR' : 'AED';
+  const color = pm.color || (currency === 'INR' ? 'var(--warning)' : 'var(--success)');
+  const icon = cardTypeIcon[pm.type] || '💳';
+
   const display = currency === 'INR'
     ? Math.abs(balance).toLocaleString('en-IN', { maximumFractionDigits: 0 })
     : Math.abs(balance).toLocaleString('en-US', {
         minimumFractionDigits: 2, maximumFractionDigits: 2,
       });
+
+  // Credit Card View
+  if (isCredit) {
+    const limit = pm.creditLimit || 0;
+    const usedAmount = balance < 0 ? Math.abs(balance) : 0;
+    const available = Math.max(0, limit - usedAmount);
+    const utilization = limit > 0 ? Math.min((usedAmount / limit) * 100, 100) : 0;
+
+    return (
+      <div style={{ padding: '12px 16px', borderBottom: isLast ? 'none' : '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10, background: color + '18',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0,
+          }}>
+            {icon}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {pm.name}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+              {pm.bankName || 'Credit Card'}
+            </div>
+          </div>
+        </div>
+
+        {/* Credit Card Progress Bar inside Dashboard */}
+        <div style={{ background: 'var(--bg)', borderRadius: 10, padding: 10, border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
+            <span style={{ color: 'var(--muted)' }}>
+              Limit: <strong>{currency === 'INR' ? '₹' : 'AED '}{limit.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong>
+            </span>
+            <span style={{ color: 'var(--muted)' }}>
+              Avail: <strong style={{ color: 'var(--success)' }}>{currency === 'INR' ? '₹' : 'AED '}{available.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong>
+            </span>
+          </div>
+          <div style={{ width: '100%', height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+            <div style={{ 
+              height: '100%', width: `${utilization}%`, 
+              background: utilization > 85 ? 'var(--danger)' : utilization > 60 ? 'var(--warning)' : 'var(--primary)',
+              borderRadius: 3
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
+            <span>Used: {currency === 'INR' ? '₹' : 'AED '}{usedAmount.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+            {balance > 0 && <span style={{ color: 'var(--success)' }}>Overpaid: {display}</span>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Standard non-credit card view
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12,
@@ -243,11 +302,11 @@ function BalanceRow({
           fontSize: 13, fontWeight: 700, color: 'var(--text)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {label}
+          {pm.name}
         </div>
-        {sublabel && (
+        {pm.bankName && (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-            {sublabel}
+            {pm.bankName}
           </div>
         )}
       </div>
@@ -956,12 +1015,8 @@ export default function Dashboard({ user }: { user: User }) {
               uaeOnlyMethods.map((pm, i) => (
                 <BalanceRow
                   key={pm.id}
-                  icon={cardTypeIcon[pm.type] || '💳'}
-                  label={pm.name}
-                  sublabel={pm.bankName || cardTypeIcon[pm.type] || ''}
+                  pm={pm}
                   balance={getMethodCurrentBalance(pm.id)}
-                  currency="AED"
-                  color={pm.color || 'var(--success)'}
                   isLast={i === uaeOnlyMethods.length - 1}
                 />
               ))
@@ -990,12 +1045,8 @@ export default function Dashboard({ user }: { user: User }) {
               indiaOnlyMethods.map((pm, i) => (
                 <BalanceRow
                   key={pm.id}
-                  icon={cardTypeIcon[pm.type] || '🏦'}
-                  label={pm.name}
-                  sublabel={pm.bankName || ''}
+                  pm={pm}
                   balance={getMethodCurrentBalance(pm.id)}
-                  currency="INR"
-                  color={pm.color || 'var(--warning)'}
                   isLast={i === indiaOnlyMethods.length - 1}
                 />
               ))
