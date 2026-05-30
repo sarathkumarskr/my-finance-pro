@@ -1,4 +1,3 @@
-// Cards.tsx
 import { useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
@@ -103,7 +102,7 @@ const cardTypeConfig: Record<CardType, { label: string; icon: string }> = {
   custom: { label: 'Custom',        icon: '➕' },
 };
 
-// ✅ Self-healing duplicate cash accounts
+// ✅ FIXED: Self-healing — deletes duplicates, creates missing
 async function ensureDefaultCashAccounts(userId: string) {
   const q = query(
     collection(db, 'paymentMethods'),
@@ -111,6 +110,7 @@ async function ensureDefaultCashAccounts(userId: string) {
     where('isCashDefault', '==', true)
   );
   const snap = await getDocs(q);
+
   const existing = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
@@ -119,16 +119,21 @@ async function ensureDefaultCashAccounts(userId: string) {
   const uaeDocs   = existing.filter((m) => m.country === 'UAE');
   const indiaDocs = existing.filter((m) => m.country === 'India');
 
+  // ✅ Delete UAE duplicates — keep only first
   if (uaeDocs.length > 1) {
-    for (const extra of uaeDocs.slice(1)) {
-      await deleteDoc(doc(db, 'paymentMethods', extra.id!));
+    for (let i = 1; i < uaeDocs.length; i++) {
+      await deleteDoc(doc(db, 'paymentMethods', uaeDocs[i].id!));
     }
   }
+
+  // ✅ Delete India duplicates — keep only first
   if (indiaDocs.length > 1) {
-    for (const extra of indiaDocs.slice(1)) {
-      await deleteDoc(doc(db, 'paymentMethods', extra.id!));
+    for (let i = 1; i < indiaDocs.length; i++) {
+      await deleteDoc(doc(db, 'paymentMethods', indiaDocs[i].id!));
     }
   }
+
+  // ✅ Create UAE cash if none exists
   if (uaeDocs.length === 0) {
     await addDoc(collection(db, 'paymentMethods'), {
       userId,
@@ -143,6 +148,8 @@ async function ensureDefaultCashAccounts(userId: string) {
       createdAt: serverTimestamp(),
     });
   }
+
+  // ✅ Create India cash if none exists
   if (indiaDocs.length === 0) {
     await addDoc(collection(db, 'paymentMethods'), {
       userId,
@@ -170,6 +177,7 @@ export default function Cards({ user }: Props) {
   const [saving, setSaving]                 = useState(false);
   const [initializing, setInitializing]     = useState(true);
 
+  // form state
   const [cardType, setCardType]                       = useState<CardType>('credit');
   const [cardName, setCardName]                       = useState('');
   const [bankName, setBankName]                       = useState('');
@@ -185,6 +193,7 @@ export default function Cards({ user }: Props) {
   const [selectedColor, setSelectedColor]             = useState(cardColors[0]);
   const [customName, setCustomName]                   = useState('');
 
+  // ── Auto-create / fix default cash accounts ──
   useEffect(() => {
     if (!user?.uid) return;
     ensureDefaultCashAccounts(user.uid)
@@ -192,6 +201,7 @@ export default function Cards({ user }: Props) {
       .finally(() => setInitializing(false));
   }, [user.uid]);
 
+  // ── Payment methods listener ──
   useEffect(() => {
     const q = query(
       collection(db, 'paymentMethods'),
@@ -205,6 +215,7 @@ export default function Cards({ user }: Props) {
     });
   }, [user.uid]);
 
+  // ── Tabby EMIs ──
   useEffect(() => {
     const q = query(
       collection(db, 'tabbyEMIs'),
@@ -218,6 +229,7 @@ export default function Cards({ user }: Props) {
     });
   }, [user.uid]);
 
+  // ── Opening balances ──
   useEffect(() => {
     const q = query(
       collection(db, 'openingBalances'),
@@ -243,6 +255,7 @@ export default function Cards({ user }: Props) {
     });
   }, [user.uid]);
 
+  // ── Transactions ──
   useEffect(() => {
     const q = query(
       collection(db, 'transactions'),
@@ -255,6 +268,7 @@ export default function Cards({ user }: Props) {
     });
   }, [user.uid]);
 
+  // ── Current Balance Calculation ──
   const getCurrentBalance = (pmId: string): number | null => {
     if (!openingBal) return null;
     const opening = openingBal.perMethod[pmId] ?? 0;
@@ -266,17 +280,18 @@ export default function Cards({ user }: Props) {
     return opening + delta;
   };
 
+  // ── Form helpers ──
   const resetForm = () => {
     setCardType('credit'); setCardName(''); setBankName('');
     setCountry('UAE'); setCreditLimit(''); setStatementDate('20');
     setPaymentDueDate('15'); setCurrentBalance('');
-    setIsTabbyPro(false); // ✅ default OFF = no EMI split
+    setIsTabbyPro(false);
     setTabbyStatementDate('24'); setTabbyPaymentDueDate('3');
     setCashEnvelopeAmount(''); setSelectedColor(cardColors[0]);
     setCustomName(''); setEditingMethod(null);
   };
 
-  const openAddModal  = () => { resetForm(); setShowModal(true); };
+  const openAddModal = () => { resetForm(); setShowModal(true); };
 
   const openEditModal = (method: PaymentMethod) => {
     setEditingMethod(method);
@@ -285,14 +300,31 @@ export default function Cards({ user }: Props) {
     setCustomName(method.type === 'custom' ? method.name || '' : '');
     setBankName(method.bankName || '');
     setCountry(method.country || 'UAE');
-    setCreditLimit(method.creditLimit !== undefined ? String(method.creditLimit) : '');
-    setStatementDate(method.statementDate !== undefined ? String(method.statementDate) : '20');
-    setPaymentDueDate(method.paymentDueDate !== undefined ? String(method.paymentDueDate) : '15');
-    setCurrentBalance(method.currentBalance !== undefined ? String(method.currentBalance) : '');
-    setIsTabbyPro(method.isTabbyPro ?? false); // ✅ default false
-    setTabbyStatementDate(method.tabbyStatementDate !== undefined ? String(method.tabbyStatementDate) : '24');
-    setTabbyPaymentDueDate(method.tabbyPaymentDueDate !== undefined ? String(method.tabbyPaymentDueDate) : '3');
-    setCashEnvelopeAmount(method.cashEnvelopeAmount !== undefined ? String(method.cashEnvelopeAmount) : '');
+    setCreditLimit(
+      method.creditLimit !== undefined ? String(method.creditLimit) : ''
+    );
+    setStatementDate(
+      method.statementDate !== undefined ? String(method.statementDate) : '20'
+    );
+    setPaymentDueDate(
+      method.paymentDueDate !== undefined ? String(method.paymentDueDate) : '15'
+    );
+    setCurrentBalance(
+      method.currentBalance !== undefined ? String(method.currentBalance) : ''
+    );
+    setIsTabbyPro(method.isTabbyPro ?? false);
+    setTabbyStatementDate(
+      method.tabbyStatementDate !== undefined
+        ? String(method.tabbyStatementDate) : '24'
+    );
+    setTabbyPaymentDueDate(
+      method.tabbyPaymentDueDate !== undefined
+        ? String(method.tabbyPaymentDueDate) : '3'
+    );
+    setCashEnvelopeAmount(
+      method.cashEnvelopeAmount !== undefined
+        ? String(method.cashEnvelopeAmount) : ''
+    );
     setSelectedColor(method.color || cardColors[0]);
     setShowModal(true);
   };
@@ -658,7 +690,6 @@ export default function Cards({ user }: Props) {
 
                 {pm.type === 'tabby' && (
                   <div>
-                    {/* ✅ FIXED: Correct label logic */}
                     <div className="country-row">
                       <span>Tabby Type</span>
                       <strong style={{
@@ -770,7 +801,7 @@ export default function Cards({ user }: Props) {
         </div>
       )}
 
-      {/* ── Modal ── */}
+      {/* ── Add / Edit Modal ── */}
       {showModal && (
         <div
           style={{
@@ -1007,7 +1038,7 @@ export default function Cards({ user }: Props) {
               </div>
             )}
 
-            {/* ✅ Tabby fields — FIXED labels */}
+            {/* Tabby fields */}
             {cardType === 'tabby' && (
               <>
                 <div style={{
@@ -1024,7 +1055,6 @@ export default function Cards({ user }: Props) {
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         ⚡ Tabby Pro
                       </div>
-                      {/* ✅ FIXED: Correct description */}
                       <div style={{
                         fontSize: 12, color: 'var(--muted)', marginTop: 4,
                       }}>
@@ -1052,8 +1082,6 @@ export default function Cards({ user }: Props) {
                       }} />
                     </button>
                   </div>
-
-                  {/* ✅ Info box explaining EMI logic */}
                   <div style={{
                     marginTop: 12, padding: '8px 10px',
                     background: isTabbyPro
@@ -1063,11 +1091,10 @@ export default function Cards({ user }: Props) {
                     lineHeight: 1.5,
                   }}>
                     {isTabbyPro
-                      ? '📅 Each purchase will be automatically split into 4 equal monthly payments'
+                      ? '📅 Each purchase auto-split into 4 equal monthly payments'
                       : '💳 Full purchase amount due in next billing cycle'}
                   </div>
                 </div>
-
                 <div style={{
                   display: 'grid', gridTemplateColumns: '1fr 1fr',
                   gap: 12, marginBottom: 16,
