@@ -17,15 +17,17 @@ import {
   onSnapshot,
   query,
   where,
-  orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import {
-  type Transaction,
-  listenTransactions,
   formatCurrency,
   type Currency,
+  type Transaction,
 } from '../firestoreHelpers';
+
+// ─── Local Helper (NOT imported from firestoreHelpers) ──
+const getMonthKey = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
 type Props = { user: User };
 type Country = 'UAE' | 'India';
@@ -81,21 +83,18 @@ const scoreBg = (score: number) =>
   'rgba(239,68,68,0.10)';
 
 const scoreLabel = (score: number) =>
-  score >= 80 ? 'Excellent 🌟' :
-  score >= 60 ? 'Good 👍' :
-  score >= 40 ? 'Fair ⚠️' :
-  'Needs Attention 🚨';
+  score >= 80 ? 'Excellent \u{1F31F}' :
+  score >= 60 ? 'Good \u{1F44D}' :
+  score >= 40 ? 'Fair \u26A0\uFE0F' :
+  'Needs Attention \u{1F6A8}';
 
 const scoreEmoji = (score: number) =>
-  score >= 80 ? '🟢' :
-  score >= 60 ? '🔵' :
-  score >= 40 ? '🟡' :
-  '🔴';
+  score >= 80 ? '\u{1F7E2}' :
+  score >= 60 ? '\u{1F535}' :
+  score >= 40 ? '\u{1F7E1}' :
+  '\u{1F534}';
 
 // ─── Month helpers ────────────────────────────
-const getMonthKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
 const getLast3Months = (): string[] => {
   const months: string[] = [];
   for (let i = 2; i >= 0; i--) {
@@ -108,15 +107,15 @@ const getLast3Months = (): string[] => {
 
 // ─── Score calculation ────────────────────────
 interface ScoreBreakdown {
-  savingsScore:    number; // 0-30
-  debtScore:       number; // 0-25
-  budgetScore:     number; // 0-25
+  savingsScore:     number; // 0-30
+  debtScore:        number; // 0-25
+  budgetScore:      number; // 0-25
   consistencyScore: number; // 0-20
-  total:           number; // 0-100
-  savingsRate:     number;
-  debtToIncome:    number;
-  budgetAdherence: number;
-  monthsTracked:   number;
+  total:            number; // 0-100
+  savingsRate:      number;
+  debtToIncome:     number;
+  budgetAdherence:  number;
+  monthsTracked:    number;
 }
 
 function calcScore(
@@ -145,7 +144,7 @@ function calcScore(
   else if (savingsRate >= 20) savingsScore = 25;
   else if (savingsRate >= 10) savingsScore = 18;
   else if (savingsRate >= 0)  savingsScore = 10;
-  else                        savingsScore = 0;  // negative savings
+  else                        savingsScore = 0;
 
   // ── 2. Debt Score (25 pts) ──
   const countryDebts   = debts.filter(d => d.country === country);
@@ -168,7 +167,7 @@ function calcScore(
   let budgetScore = 0;
 
   if (curBudgets.length === 0) {
-    budgetScore = 10; // No budgets set → partial credit
+    budgetScore = 10;
     budgetAdherence = 0;
   } else {
     const totalBudget = curBudgets.reduce((s, b) => s + b.budgetAmount, 0);
@@ -228,97 +227,90 @@ function getRecommendations(
 ): Recommendation[] {
   const recs: Recommendation[] = [];
 
-  // UAE savings
   if (uaeScore.savingsRate < 10) {
     recs.push({
-      icon: '💰', priority: 'high',
+      icon: '\uD83D\uDCB0', priority: 'high',
       title: 'Increase UAE Savings Rate',
-      description: `Your UAE savings rate is ${uaeScore.savingsRate.toFixed(1)}%. Aim for at least 20%. Try cutting dining out or entertainment expenses.`,
+      description: `Your UAE savings rate is ${uaeScore.savingsRate.toFixed(1)}%. Aim for at least 20%.`,
     });
   } else if (uaeScore.savingsRate >= 20) {
     recs.push({
-      icon: '🌟', priority: 'low',
+      icon: '\u{1F31F}', priority: 'low',
       title: 'Great UAE Savings Rate!',
-      description: `You're saving ${uaeScore.savingsRate.toFixed(1)}% of your UAE income. Keep it up! Consider investing the surplus.`,
+      description: `You're saving ${uaeScore.savingsRate.toFixed(1)}% of your UAE income. Keep it up!`,
     });
   }
 
-  // India savings
   if (indiaScore.savingsRate < 0) {
     recs.push({
-      icon: '🚨', priority: 'high',
+      icon: '\u{1F6A8}', priority: 'high',
       title: 'India Expenses Exceed Income',
-      description: 'Your India expenses are higher than income. Review fixed costs or increase the monthly remittance amount.',
+      description: 'Your India expenses are higher than income. Review fixed costs.',
     });
   }
 
-  // Debt
   if (uaeScore.debtToIncome > 35) {
     recs.push({
-      icon: '🏦', priority: 'high',
+      icon: '\uD83C\uDFE6', priority: 'high',
       title: 'High Debt-to-Income Ratio',
-      description: `${uaeScore.debtToIncome.toFixed(1)}% of your UAE income goes to debt payments. Try to pay off high-interest debts first.`,
+      description: `${uaeScore.debtToIncome.toFixed(1)}% of UAE income goes to debt payments.`,
     });
   }
 
   if (indiaScore.debtToIncome > 40) {
     recs.push({
-      icon: '🏡', priority: 'high',
+      icon: '\uD83C\uDFE0', priority: 'high',
       title: 'India EMI Load is High',
-      description: `${indiaScore.debtToIncome.toFixed(1)}% of India income goes to EMIs. Consider increasing remittance to cover this comfortably.`,
+      description: `${indiaScore.debtToIncome.toFixed(1)}% of India income goes to EMIs.`,
     });
   }
 
-  // Budget
   if (uaeScore.budgetAdherence === 0) {
     recs.push({
-      icon: '📊', priority: 'medium',
+      icon: '\uD83D\uDCCA', priority: 'medium',
       title: 'Set UAE Monthly Budgets',
-      description: 'You have no budgets set for UAE this month. Setting budgets helps track overspending by category.',
+      description: 'No UAE budgets set this month. Setting budgets helps track spending.',
     });
   } else if (uaeScore.budgetAdherence > 110) {
     recs.push({
-      icon: '⚠️', priority: 'high',
+      icon: '\u26A0\uFE0F', priority: 'high',
       title: 'UAE Budget Exceeded',
-      description: `You've spent ${uaeScore.budgetAdherence.toFixed(0)}% of your UAE budget this month. Review your biggest expense categories.`,
+      description: `You've spent ${uaeScore.budgetAdherence.toFixed(0)}% of UAE budget.`,
     });
   }
 
   if (indiaScore.budgetAdherence === 0) {
     recs.push({
-      icon: '📊', priority: 'medium',
+      icon: '\uD83D\uDCCA', priority: 'medium',
       title: 'Set India Monthly Budgets',
-      description: 'No India budgets set this month. Track your INR fixed costs like EMI, groceries and utilities.',
+      description: 'No India budgets set this month.',
     });
   }
 
-  // Consistency
   if (uaeScore.monthsTracked < 2) {
     recs.push({
-      icon: '📅', priority: 'medium',
+      icon: '\uD83D\uDCC5', priority: 'medium',
       title: 'Track Consistently',
-      description: 'Only 1 month of UAE data found. Add income and expenses regularly for accurate health scoring.',
+      description: 'Only 1 month of UAE data. Track regularly for accurate scoring.',
     });
   }
 
-  // Positive reinforcement
   if (uaeScore.total >= 80) {
     recs.push({
-      icon: '🎯', priority: 'low',
+      icon: '\uD83C\uDFAF', priority: 'low',
       title: 'Excellent Financial Health!',
-      description: 'Your UAE finances are in great shape. Consider growing your investments or emergency fund.',
+      description: 'UAE finances are in great shape. Consider growing investments.',
     });
   }
 
   if (debts.filter(d => Math.max(d.totalAmount - d.paidAmount, 0) === 0).length > 0) {
     recs.push({
-      icon: '✅', priority: 'low',
+      icon: '\u2705', priority: 'low',
       title: 'Debt Cleared!',
-      description: 'You have fully paid off at least one debt. Great discipline! Redirect that EMI amount to savings.',
+      description: 'At least one debt fully paid. Redirect EMI to savings.',
     });
   }
 
-  // Sort: high → medium → low
   const order = { high: 0, medium: 1, low: 2 };
   return recs.sort((a, b) => order[a.priority] - order[b.priority]).slice(0, 5);
 }
@@ -334,28 +326,52 @@ export default function Health({ user }: Props) {
   const [activeTab,    setActiveTab]    = useState<'UAE' | 'India'>('UAE');
 
   // ── Listeners ──
-  useEffect(() => listenTransactions(user.uid, 'all', setTransactions), [user.uid]);
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(collection(db, 'transactions'), where('userId', '==', user.uid));
+    return onSnapshot(q, snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Transaction[];
+      list.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      setTransactions(list);
+    });
+  }, [user.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
     const q = query(collection(db, 'debts'), where('userId', '==', user.uid));
     return onSnapshot(q, snap => {
       setDebts(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Debt[]);
     });
   }, [user.uid]);
 
+  // ✅ FIXED: budgetItems collection
   useEffect(() => {
+    if (!user?.uid) return;
     const curMonth = getMonthKey(new Date());
     const q = query(
-      collection(db, 'budgets'),
+      collection(db, 'budgetItems'),
       where('userId', '==', user.uid),
-      where('month',  '==', curMonth)
+      where('isActive', '==', true)
     );
     return onSnapshot(q, snap => {
-      setBudgets(snap.docs.map(d => ({ id: d.id, ...d.data() })) as BudgetDoc[]);
+      const mapped: BudgetDoc[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          userId: data.userId,
+          country: data.country || 'UAE',
+          currency: (data.country === 'India' ? 'INR' : 'AED') as Currency,
+          category: data.name || 'Unknown',
+          budgetAmount: data.amount || 0,
+          month: curMonth,
+        };
+      });
+      setBudgets(mapped);
     });
   }, [user.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
     const q = query(collection(db, 'remittances'), where('userId', '==', user.uid));
     return onSnapshot(q, snap => {
       setRemittances(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Remittance[]);
@@ -367,7 +383,7 @@ export default function Health({ user }: Props) {
   const indiaScore = useMemo(() => calcScore(transactions, debts, budgets, remittances, 'India'), [transactions, debts, budgets, remittances]);
   const overallScore = Math.round((uaeScore.total + indiaScore.total) / 2);
 
-  // ── Recommendations ──
+  // ── Recommendations ─
   const recommendations = useMemo(() =>
     getRecommendations(uaeScore, indiaScore, transactions, debts, budgets),
     [uaeScore, indiaScore, transactions, debts, budgets]
@@ -401,7 +417,7 @@ export default function Health({ user }: Props) {
         <div>
           <h1 className="page-title">Financial Health</h1>
           <p className="page-subtitle">
-            Score based on savings, debt, budgets & consistency
+            Score based on savings, debt, budgets &amp; consistency
           </p>
         </div>
       </div>
@@ -409,8 +425,8 @@ export default function Health({ user }: Props) {
       {/* ── Overall Score Card ── */}
       <div className="card" style={{
         marginBottom: 20,
-        background: `linear-gradient(135deg, ${scoreBg(overallScore)}, var(--card))`,
-        border: `1.5px solid ${scoreColor(overallScore)}33`,
+        background: 'linear-gradient(135deg, ' + scoreBg(overallScore) + ', var(--card))',
+        border: '1.5px solid ' + scoreColor(overallScore) + '33',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
 
@@ -443,14 +459,14 @@ export default function Health({ user }: Props) {
             {/* UAE vs India mini scores */}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {[
-                { label: '🇦🇪 UAE Score',   score: uaeScore.total   },
-                { label: '🇮🇳 India Score', score: indiaScore.total },
+                { label: '\u{1F1E6}\u{1F1EA} UAE Score',   score: uaeScore.total   },
+                { label: '\u{1F1EE}\u{1F1F3} India Score', score: indiaScore.total },
               ].map((item, i) => (
                 <div key={i} style={{
                   padding: '10px 16px',
                   borderRadius: 12,
                   background: scoreBg(item.score),
-                  border: `1px solid ${scoreColor(item.score)}33`,
+                  border: '1px solid ' + scoreColor(item.score) + '33',
                   display: 'flex', alignItems: 'center', gap: 10,
                 }}>
                   <div style={{ fontSize: 22, fontWeight: 900, color: scoreColor(item.score) }}>
@@ -473,10 +489,10 @@ export default function Health({ user }: Props) {
       <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
         {(['UAE', 'India'] as const).map(c => (
           <button key={c}
-            className={`btn ${activeTab === c ? 'btn-primary' : 'btn-secondary'}`}
+            className={'btn ' + (activeTab === c ? 'btn-primary' : 'btn-secondary')}
             style={{ flex: 1, justifyContent: 'center' }}
             onClick={() => setActiveTab(c)}>
-            {c === 'UAE' ? '🇦🇪 UAE Details' : '🇮🇳 India Details'}
+            {c === 'UAE' ? '\u{1F1E6}\u{1F1EA} UAE Details' : '\u{1F1EE}\u{1F1F3} India Details'}
           </button>
         ))}
       </div>
@@ -486,7 +502,7 @@ export default function Health({ user }: Props) {
 
         {/* Savings */}
         <div className="stat-card" style={{
-          border: `1.5px solid ${scoreColor(activeScore.savingsScore * (100/30))}33`,
+          border: '1.5px solid ' + scoreColor(activeScore.savingsScore * (100/30)) + '33',
         }}>
           <div className="stat-top">
             <div className="stat-icon" style={{ background: scoreBg(activeScore.savingsScore * (100/30)), color: scoreColor(activeScore.savingsScore * (100/30)) }}>
@@ -501,7 +517,7 @@ export default function Health({ user }: Props) {
             {activeScore.savingsRate.toFixed(1)}%
           </div>
           <div className="stat-note">
-            {activeScore.savingsRate >= 20 ? '✅ Excellent' : activeScore.savingsRate >= 10 ? '⚠️ Moderate' : '🚨 Low'}
+            {activeScore.savingsRate >= 20 ? '\u2705 Excellent' : activeScore.savingsRate >= 10 ? '\u26A0\uFE0F Moderate' : '\u{1F6A8} Low'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.savingsScore / 30) * 100}%`, background: scoreColor(activeScore.savingsScore * (100/30)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -510,7 +526,7 @@ export default function Health({ user }: Props) {
 
         {/* Debt */}
         <div className="stat-card" style={{
-          border: `1.5px solid ${scoreColor(activeScore.debtScore * (100/25))}33`,
+          border: '1.5px solid ' + scoreColor(activeScore.debtScore * (100/25)) + '33',
         }}>
           <div className="stat-top">
             <div className="stat-icon" style={{ background: scoreBg(activeScore.debtScore * (100/25)), color: scoreColor(activeScore.debtScore * (100/25)) }}>
@@ -525,7 +541,7 @@ export default function Health({ user }: Props) {
             {activeScore.debtToIncome.toFixed(1)}%
           </div>
           <div className="stat-note">
-            {activeScore.debtToIncome === 0 ? '✅ Debt Free' : activeScore.debtToIncome <= 20 ? '✅ Healthy' : activeScore.debtToIncome <= 35 ? '⚠️ Moderate' : '🚨 High'}
+            {activeScore.debtToIncome === 0 ? '\u2705 Debt Free' : activeScore.debtToIncome <= 20 ? '\u2705 Healthy' : activeScore.debtToIncome <= 35 ? '\u26A0\uFE0F Moderate' : '\u{1F6A8} High'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.debtScore / 25) * 100}%`, background: scoreColor(activeScore.debtScore * (100/25)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -534,7 +550,7 @@ export default function Health({ user }: Props) {
 
         {/* Budget */}
         <div className="stat-card" style={{
-          border: `1.5px solid ${scoreColor(activeScore.budgetScore * (100/25))}33`,
+          border: '1.5px solid ' + scoreColor(activeScore.budgetScore * (100/25)) + '33',
         }}>
           <div className="stat-top">
             <div className="stat-icon" style={{ background: scoreBg(activeScore.budgetScore * (100/25)), color: scoreColor(activeScore.budgetScore * (100/25)) }}>
@@ -549,7 +565,7 @@ export default function Health({ user }: Props) {
             {activeScore.budgetAdherence === 0 ? 'N/A' : `${activeScore.budgetAdherence.toFixed(0)}%`}
           </div>
           <div className="stat-note">
-            {activeScore.budgetAdherence === 0 ? '— No budgets set' : activeScore.budgetAdherence <= 90 ? '✅ Under budget' : activeScore.budgetAdherence <= 100 ? '✅ On budget' : '🚨 Over budget'}
+            {activeScore.budgetAdherence === 0 ? '\u2014 No budgets set' : activeScore.budgetAdherence <= 90 ? '\u2705 Under budget' : activeScore.budgetAdherence <= 100 ? '\u2705 On budget' : '\u{1F6A8} Over budget'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.budgetScore / 25) * 100}%`, background: scoreColor(activeScore.budgetScore * (100/25)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -558,7 +574,7 @@ export default function Health({ user }: Props) {
 
         {/* Consistency */}
         <div className="stat-card" style={{
-          border: `1.5px solid ${scoreColor(activeScore.consistencyScore * (100/20))}33`,
+          border: '1.5px solid ' + scoreColor(activeScore.consistencyScore * (100/20)) + '33',
         }}>
           <div className="stat-top">
             <div className="stat-icon" style={{ background: scoreBg(activeScore.consistencyScore * (100/20)), color: scoreColor(activeScore.consistencyScore * (100/20)) }}>
@@ -573,7 +589,7 @@ export default function Health({ user }: Props) {
             {activeScore.monthsTracked}/3
           </div>
           <div className="stat-note">
-            {activeScore.monthsTracked >= 3 ? '✅ 3 months tracked' : activeScore.monthsTracked === 2 ? '⚠️ 2 months tracked' : '🚨 Limited data'}
+            {activeScore.monthsTracked >= 3 ? '\u2705 3 months tracked' : activeScore.monthsTracked === 2 ? '\u26A0\uFE0F 2 months tracked' : '\u{1F6A8} Limited data'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.consistencyScore / 20) * 100}%`, background: scoreColor(activeScore.consistencyScore * (100/20)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -588,14 +604,14 @@ export default function Health({ user }: Props) {
         {/* Score breakdown visual */}
         <div className="card">
           <h3 className="section-title">
-            {activeTab === 'UAE' ? '🇦🇪' : '🇮🇳'} {activeTab} Score Breakdown
+            {activeTab === 'UAE' ? '\u{1F1E6}\u{1F1EA}' : '\u{1F1EE}\u{1F1F3}'} {activeTab} Score Breakdown
           </h3>
 
           {[
-            { label: 'Savings Rate',   score: activeScore.savingsScore,    max: 30, icon: '💰' },
-            { label: 'Debt Ratio',     score: activeScore.debtScore,       max: 25, icon: '🏦' },
-            { label: 'Budget Control', score: activeScore.budgetScore,     max: 25, icon: '📊' },
-            { label: 'Consistency',    score: activeScore.consistencyScore, max: 20, icon: '📅' },
+            { label: 'Savings Rate',   score: activeScore.savingsScore,    max: 30, icon: '\uD83D\uDCB0' },
+            { label: 'Debt Ratio',     score: activeScore.debtScore,       max: 25, icon: '\uD83C\uDFE6' },
+            { label: 'Budget Control', score: activeScore.budgetScore,     max: 25, icon: '\uD83D\uDCCA' },
+            { label: 'Consistency',    score: activeScore.consistencyScore, max: 20, icon: '\uD83D\uDCC5' },
           ].map((item, i) => {
             const pct = (item.score / item.max) * 100;
             return (
@@ -623,11 +639,11 @@ export default function Health({ user }: Props) {
             marginTop: 8, padding: '12px 16px',
             borderRadius: 12,
             background: scoreBg(activeScore.total),
-            border: `1px solid ${scoreColor(activeScore.total)}33`,
+            border: '1px solid ' + scoreColor(activeScore.total) + '33',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>
-              {activeTab === 'UAE' ? '🇦🇪 UAE' : '🇮🇳 India'} Total Score
+              {activeTab === 'UAE' ? '\u{1F1E6}\u{1F1EA} UAE' : '\u{1F1EE}\u{1F1F3} India'} Total Score
             </span>
             <span style={{ fontSize: 24, fontWeight: 900, color: scoreColor(activeScore.total) }}>
               {activeScore.total} / 100
@@ -693,10 +709,10 @@ export default function Health({ user }: Props) {
         </div>
       </div>
 
-      {/* ── Recommendations ── */}
+      {/* ── Recommendations ─ */}
       <div className="card">
         <h3 className="section-title">
-          💡 Smart Recommendations
+          {'\uD83D\uDCA1 Smart Recommendations'}
           <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, marginLeft: 8 }}>
             ({recommendations.length} insights)
           </span>
@@ -731,7 +747,7 @@ export default function Health({ user }: Props) {
                 <div key={i} style={{
                   padding: '14px 16px',
                   borderRadius: 14,
-                  border: `1.5px solid ${borderColor}`,
+                  border: '1.5px solid ' + borderColor,
                   background: bgColor,
                   display: 'flex',
                   gap: 14,
