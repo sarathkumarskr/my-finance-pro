@@ -211,4 +211,4 @@ export default function Layout({ user }: LayoutProps) {
       </nav>
     </div>
   );
-}
+} 
