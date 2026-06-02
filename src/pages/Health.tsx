@@ -85,7 +85,7 @@ const scoreBg = (score: number) =>
 const scoreLabel = (score: number) =>
   score >= 80 ? 'Excellent \u{1F31F}' :
   score >= 60 ? 'Good \u{1F44D}' :
-  score >= 40 ? 'Fair \u26A0\uFE0F' :
+  score >= 40 ? 'Fair ⚠️' :
   'Needs Attention \u{1F6A8}';
 
 const scoreEmoji = (score: number) =>
@@ -229,7 +229,7 @@ function getRecommendations(
 
   if (uaeScore.savingsRate < 10) {
     recs.push({
-      icon: '\uD83D\uDCB0', priority: 'high',
+      icon: '💰', priority: 'high',
       title: 'Increase UAE Savings Rate',
       description: `Your UAE savings rate is ${uaeScore.savingsRate.toFixed(1)}%. Aim for at least 20%.`,
     });
@@ -251,7 +251,7 @@ function getRecommendations(
 
   if (uaeScore.debtToIncome > 35) {
     recs.push({
-      icon: '\uD83C\uDFE6', priority: 'high',
+      icon: '🏦', priority: 'high',
       title: 'High Debt-to-Income Ratio',
       description: `${uaeScore.debtToIncome.toFixed(1)}% of UAE income goes to debt payments.`,
     });
@@ -259,7 +259,7 @@ function getRecommendations(
 
   if (indiaScore.debtToIncome > 40) {
     recs.push({
-      icon: '\uD83C\uDFE0', priority: 'high',
+      icon: '🏠', priority: 'high',
       title: 'India EMI Load is High',
       description: `${indiaScore.debtToIncome.toFixed(1)}% of India income goes to EMIs.`,
     });
@@ -267,13 +267,13 @@ function getRecommendations(
 
   if (uaeScore.budgetAdherence === 0) {
     recs.push({
-      icon: '\uD83D\uDCCA', priority: 'medium',
+      icon: '📊', priority: 'medium',
       title: 'Set UAE Monthly Budgets',
       description: 'No UAE budgets set this month. Setting budgets helps track spending.',
     });
   } else if (uaeScore.budgetAdherence > 110) {
     recs.push({
-      icon: '\u26A0\uFE0F', priority: 'high',
+      icon: '⚠️', priority: 'high',
       title: 'UAE Budget Exceeded',
       description: `You've spent ${uaeScore.budgetAdherence.toFixed(0)}% of UAE budget.`,
     });
@@ -281,7 +281,7 @@ function getRecommendations(
 
   if (indiaScore.budgetAdherence === 0) {
     recs.push({
-      icon: '\uD83D\uDCCA', priority: 'medium',
+      icon: '📊', priority: 'medium',
       title: 'Set India Monthly Budgets',
       description: 'No India budgets set this month.',
     });
@@ -289,7 +289,7 @@ function getRecommendations(
 
   if (uaeScore.monthsTracked < 2) {
     recs.push({
-      icon: '\uD83D\uDCC5', priority: 'medium',
+      icon: '📅', priority: 'medium',
       title: 'Track Consistently',
       description: 'Only 1 month of UAE data. Track regularly for accurate scoring.',
     });
@@ -297,7 +297,7 @@ function getRecommendations(
 
   if (uaeScore.total >= 80) {
     recs.push({
-      icon: '\uD83C\uDFAF', priority: 'low',
+      icon: '🎯', priority: 'low',
       title: 'Excellent Financial Health!',
       description: 'UAE finances are in great shape. Consider growing investments.',
     });
@@ -305,7 +305,7 @@ function getRecommendations(
 
   if (debts.filter(d => Math.max(d.totalAmount - d.paidAmount, 0) === 0).length > 0) {
     recs.push({
-      icon: '\u2705', priority: 'low',
+      icon: '✅', priority: 'low',
       title: 'Debt Cleared!',
       description: 'At least one debt fully paid. Redirect EMI to savings.',
     });
@@ -517,7 +517,7 @@ export default function Health({ user }: Props) {
             {activeScore.savingsRate.toFixed(1)}%
           </div>
           <div className="stat-note">
-            {activeScore.savingsRate >= 20 ? '\u2705 Excellent' : activeScore.savingsRate >= 10 ? '\u26A0\uFE0F Moderate' : '\u{1F6A8} Low'}
+            {activeScore.savingsRate >= 20 ? '✅ Excellent' : activeScore.savingsRate >= 10 ? '⚠️ Moderate' : '\u{1F6A8} Low'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.savingsScore / 30) * 100}%`, background: scoreColor(activeScore.savingsScore * (100/30)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -541,7 +541,7 @@ export default function Health({ user }: Props) {
             {activeScore.debtToIncome.toFixed(1)}%
           </div>
           <div className="stat-note">
-            {activeScore.debtToIncome === 0 ? '\u2705 Debt Free' : activeScore.debtToIncome <= 20 ? '\u2705 Healthy' : activeScore.debtToIncome <= 35 ? '\u26A0\uFE0F Moderate' : '\u{1F6A8} High'}
+            {activeScore.debtToIncome === 0 ? '✅ Debt Free' : activeScore.debtToIncome <= 20 ? '✅ Healthy' : activeScore.debtToIncome <= 35 ? '⚠️ Moderate' : '\u{1F6A8} High'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.debtScore / 25) * 100}%`, background: scoreColor(activeScore.debtScore * (100/25)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -565,7 +565,7 @@ export default function Health({ user }: Props) {
             {activeScore.budgetAdherence === 0 ? 'N/A' : `${activeScore.budgetAdherence.toFixed(0)}%`}
           </div>
           <div className="stat-note">
-            {activeScore.budgetAdherence === 0 ? '\u2014 No budgets set' : activeScore.budgetAdherence <= 90 ? '\u2705 Under budget' : activeScore.budgetAdherence <= 100 ? '\u2705 On budget' : '\u{1F6A8} Over budget'}
+            {activeScore.budgetAdherence === 0 ? '— No budgets set' : activeScore.budgetAdherence <= 90 ? '✅ Under budget' : activeScore.budgetAdherence <= 100 ? '✅ On budget' : '\u{1F6A8} Over budget'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.budgetScore / 25) * 100}%`, background: scoreColor(activeScore.budgetScore * (100/25)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -589,7 +589,7 @@ export default function Health({ user }: Props) {
             {activeScore.monthsTracked}/3
           </div>
           <div className="stat-note">
-            {activeScore.monthsTracked >= 3 ? '\u2705 3 months tracked' : activeScore.monthsTracked === 2 ? '\u26A0\uFE0F 2 months tracked' : '\u{1F6A8} Limited data'}
+            {activeScore.monthsTracked >= 3 ? '✅ 3 months tracked' : activeScore.monthsTracked === 2 ? '⚠️ 2 months tracked' : '\u{1F6A8} Limited data'}
           </div>
           <div style={{ marginTop: 10, height: 5, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(activeScore.consistencyScore / 20) * 100}%`, background: scoreColor(activeScore.consistencyScore * (100/20)), borderRadius: 99, transition: 'width 0.8s ease' }} />
@@ -608,10 +608,10 @@ export default function Health({ user }: Props) {
           </h3>
 
           {[
-            { label: 'Savings Rate',   score: activeScore.savingsScore,    max: 30, icon: '\uD83D\uDCB0' },
-            { label: 'Debt Ratio',     score: activeScore.debtScore,       max: 25, icon: '\uD83C\uDFE6' },
-            { label: 'Budget Control', score: activeScore.budgetScore,     max: 25, icon: '\uD83D\uDCCA' },
-            { label: 'Consistency',    score: activeScore.consistencyScore, max: 20, icon: '\uD83D\uDCC5' },
+            { label: 'Savings Rate',   score: activeScore.savingsScore,    max: 30, icon: '💰' },
+            { label: 'Debt Ratio',     score: activeScore.debtScore,       max: 25, icon: '🏦' },
+            { label: 'Budget Control', score: activeScore.budgetScore,     max: 25, icon: '📊' },
+            { label: 'Consistency',    score: activeScore.consistencyScore, max: 20, icon: '📅' },
           ].map((item, i) => {
             const pct = (item.score / item.max) * 100;
             return (
@@ -712,7 +712,7 @@ export default function Health({ user }: Props) {
       {/* ── Recommendations ─ */}
       <div className="card">
         <h3 className="section-title">
-          {'\uD83D\uDCA1 Smart Recommendations'}
+          {'💡 Smart Recommendations'}
           <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, marginLeft: 8 }}>
             ({recommendations.length} insights)
           </span>

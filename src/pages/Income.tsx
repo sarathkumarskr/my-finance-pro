@@ -15,8 +15,8 @@ interface PaymentMethod {
 }
 
 const cardTypeIcon: Record<string, string> = {
-  credit: '\uD83D\uDCB3', debit: '\uD83C\uDFE6', tabby: '\uD83D\uDECD\uFE0F',
-  cash: '\uD83D\uDCB5', upi: '\uD83D\uDCF1', custom: '\u2795',
+  credit: '💳', debit: '🏦', tabby: '🛍️',
+  cash: '💵', upi: '📱', custom: '➕',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -169,7 +169,7 @@ export default function Income({ user }: { user: User }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: 'var(--card)', padding: 6, borderRadius: 12, border: '1px solid var(--border)', width: 'fit-content' }}>
         {(['ALL', 'UAE', 'India'] as const).map((c) => (
           <button key={c} onClick={() => setFilterCountry(c)} style={{ border: 'none', background: filterCountry === c ? 'var(--success)' : 'transparent', color: 'var(--text)', padding: '7px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
-            {c === 'ALL' ? '\uD83C\uDF0D All' : c === 'UAE' ? '\uD83C\uDDE6\uD83C\uDDEA UAE' : '\uD83C\uDDEE\uD83C\uDDF3 India'}
+            {c === 'ALL' ? '\uD83C\uDF0D All' : c === 'UAE' ? '🇦🇪 UAE' : '🇮🇳 India'}
           </button>
         ))}
       </div>
@@ -191,11 +191,11 @@ export default function Income({ user }: { user: User }) {
             <div key={tx.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 17, padding: '14px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: '220px', flex: 1 }}>
                 <div style={{ width: 42, height: 42, borderRadius: 14, background: 'rgba(16, 185, 129, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 18 }}>
-                  {defaultIncomeCategories.find(c => c.name.toLowerCase() === tx.category.toLowerCase())?.icon || '\uD83D\uDCB0'}
+                  {defaultIncomeCategories.find(c => c.name.toLowerCase() === tx.category.toLowerCase())?.icon || '💰'}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 900, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {tx.category}{tx.subCategory && <span style={{ opacity: 0.6, fontSize: 14, fontWeight: 700 }}> \u203A {tx.subCategory}</span>}
+                    {tx.category}{tx.subCategory && <span style={{ opacity: 0.6, fontSize: 14, fontWeight: 700 }}> › {tx.subCategory}</span>}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {tx.paymentMethodName || 'Unknown'} \u2022 {tx.date}
@@ -205,7 +205,7 @@ export default function Income({ user }: { user: User }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto', flexShrink: 0 }}>
                 <span style={{ color: 'var(--success)', fontWeight: 900, fontSize: 16, whiteSpace: 'nowrap' }}>
-                  +{tx.currency === 'INR' ? '\u20B9' : 'AED '}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: tx.currency === 'AED' ? 2 : 0, maximumFractionDigits: 2 })}
+                  +{tx.currency === 'INR' ? '₹' : 'AED '}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: tx.currency === 'AED' ? 2 : 0, maximumFractionDigits: 2 })}
                 </span>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }} onClick={(e) => { e.stopPropagation(); setEditingTxId(tx.id ?? null); }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', padding: 6, borderRadius: 8, pointerEvents: 'auto', display: 'flex', alignItems: 'center' }}>
@@ -250,7 +250,7 @@ export default function Income({ user }: { user: User }) {
                     const active = currency === c;
                     return (
                       <button key={c} type="button" onClick={() => { setCurrency(c); setPaymentMethodId(''); }} style={{ padding: '11px 10px', borderRadius: 12, border: `2px solid ${active ? 'var(--success)' : 'var(--border)'}`, background: active ? 'var(--success)' : 'var(--card)', color: active ? '#fff' : 'var(--text)', fontWeight: 800, cursor: 'pointer', fontSize: 14 }}>
-                        {c === 'AED' ? '\uD83C\uDDE6 AED' : '\uD83C\uDDEE\uD83C\uDDF3 INR'}
+                        {c === 'AED' ? '\uD83C\uDDE6 AED' : '🇮🇳 INR'}
                       </button>
                     );
                   })}
@@ -276,7 +276,7 @@ export default function Income({ user }: { user: User }) {
                 ) : (
                   <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)} style={inputStyle}>
                     <option value="">Select account</option>
-                    {modalMethods.map((m) => (<option key={m.id} value={m.id}>{cardTypeIcon[m.type] || '\uD83D\uDCB3'} {m.name} {m.bankName ? `(${m.bankName})` : ''}</option>))}
+                    {modalMethods.map((m) => (<option key={m.id} value={m.id}>{cardTypeIcon[m.type] || '💳'} {m.name} {m.bankName ? `(${m.bankName})` : ''}</option>))}
                   </select>
                 )}
               </div>
