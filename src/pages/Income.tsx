@@ -15,8 +15,8 @@ interface PaymentMethod {
 }
 
 const cardTypeIcon: Record<string, string> = {
-  credit: '💳', debit: '🏦', tabby: '🛍️',
-  cash: '💵', upi: '📱', custom: '➕',
+  credit: '\uD83D\uDCB3', debit: '\uD83C\uDFE6', tabby: '\uD83D\uDECD\uFE0F',
+  cash: '\uD83D\uDCB5', upi: '\uD83D\uDCF1', custom: '\u2795',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -195,7 +195,7 @@ export default function Income({ user }: { user: User }) {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 900, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {tx.category}{tx.subCategory && <span style={{ opacity: 0.6, fontSize: 14, fontWeight: 700 }}> › {tx.subCategory}</span>}
+                    {tx.category}{tx.subCategory && <span style={{ opacity: 0.6, fontSize: 14, fontWeight: 700 }}> \u203A {tx.subCategory}</span>}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {tx.paymentMethodName || 'Unknown'} \u2022 {tx.date}
@@ -205,7 +205,7 @@ export default function Income({ user }: { user: User }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto', flexShrink: 0 }}>
                 <span style={{ color: 'var(--success)', fontWeight: 900, fontSize: 16, whiteSpace: 'nowrap' }}>
-                  +{tx.currency === 'INR' ? '₹' : 'AED '}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: tx.currency === 'AED' ? 2 : 0, maximumFractionDigits: 2 })}
+                  +{tx.currency === 'INR' ? '\u20B9' : 'AED '}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: tx.currency === 'AED' ? 2 : 0, maximumFractionDigits: 2 })}
                 </span>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }} onClick={(e) => { e.stopPropagation(); setEditingTxId(tx.id ?? null); }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', cursor: 'pointer', padding: 6, borderRadius: 8, pointerEvents: 'auto', display: 'flex', alignItems: 'center' }}>
@@ -276,7 +276,7 @@ export default function Income({ user }: { user: User }) {
                 ) : (
                   <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)} style={inputStyle}>
                     <option value="">Select account</option>
-                    {modalMethods.map((m) => (<option key={m.id} value={m.id}>{cardTypeIcon[m.type] || '💳'} {m.name} {m.bankName ? `(${m.bankName})` : ''}</option>))}
+                    {modalMethods.map((m) => (<option key={m.id} value={m.id}>{cardTypeIcon[m.type] || '\uD83D\uDCB3'} {m.name} {m.bankName ? `(${m.bankName})` : ''}</option>))}
                   </select>
                 )}
               </div>

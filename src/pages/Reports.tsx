@@ -84,9 +84,9 @@ const getLatestDataMonth = (transactions: Transaction[], remittances: Remittance
   if (months.length === 0) return getCurrentMonth();
   return months.sort().reverse()[0];
 };
-const fmt = (amount: number, currency: Currency) => currency === 'AED' ? `AED ${amount.toLocaleString('en-US',{maximumFractionDigits:0})}` : `₹${amount.toLocaleString('en-IN',{maximumFractionDigits:0})}`;
+const fmt = (amount: number, currency: Currency) => currency === 'AED' ? `AED ${amount.toLocaleString('en-US',{maximumFractionDigits:0})}` : `\u20B9${amount.toLocaleString('en-IN',{maximumFractionDigits:0})}`;
 const shortNum = (v: number, currency?: Currency) => {
-  if (currency === 'INR') return `₹${(v/1000).toFixed(0)}k`;
+  if (currency === 'INR') return `\u20B9${(v/1000).toFixed(0)}k`;
   if (currency === 'AED') return `${(v/1000).toFixed(0)}k`;
   return `${(v/1000).toFixed(0)}k`;
 };
@@ -187,7 +187,7 @@ export default function Reports({ user }: { user: User }) {
   useEffect(() => { if(!user?.uid) return; loadReports(false,true); }, [user.uid]);
 
   const months = useMemo(() => getPastMonthsFrom(endMonth||getCurrentMonth(), period), [endMonth, period]);
-  const rangeLabel = months.length>0 ? `${getLongMonthLabel(months[0])} → ${getLongMonthLabel(months[months.length-1])}` : '';
+  const rangeLabel = months.length>0 ? `${getLongMonthLabel(months[0])} \u2192 ${getLongMonthLabel(months[months.length-1])}` : '';
 
   const getAccountName = (id:string):string => {
     if(!id) return 'Unknown';

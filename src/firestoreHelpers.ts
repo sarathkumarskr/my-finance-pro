@@ -785,3 +785,272 @@ export function canTabbyPurchase(
   }
   return { allowed: true, available };
 }
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACCOUNT MASTER — Chart of Accounts (Phase 4 ERP)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { setDoc, deleteDoc as deleteDocFn, writeBatch, getDocs } from 'firebase/firestore';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type AccountClass = 'Asset' | 'Liability' | 'Equity' | 'Income' | 'Expense';
+
+export interface GLAccount {
+  id?: string;
+  userId: string;
+  code: string;
+  name: string;
+  accountClass: AccountClass;
+  accountType: string;
+  parentCode?: string | null;
+  description?: string | null;
+  isSystemAccount: boolean;
+  isActive: boolean;
+  isDefault: boolean;
+  icon?: string | null;
+  color?: string | null;
+  sortOrder?: number;
+  paymentMethodId?: string | null;
+  balance?: number;
+  transactionCount?: number;
+  lastTransactionDate?: string | null;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+// ─── Default Chart of Accounts Seed Data ────────────────────────────────────
+
+export const DEFAULT_GL_ACCOUNTS: Omit<GLAccount, 'id' | 'userId' | 'createdAt'>[] = [
+  // ASSETS — 1000s
+  { code: '1000', name: 'Current Assets',     accountClass: 'Asset',     accountType: 'Group',          isSystemAccount: true, isActive: true, isDefault: false, icon: '💰', sortOrder: 1, parentCode: null },
+  { code: '1001', name: 'UAE Cash',           accountClass: 'Asset',     accountType: 'Cash',           isSystemAccount: true, isActive: true, isDefault: true,  icon: '💵', sortOrder: 2, parentCode: '1000' },
+  { code: '1002', name: 'India Cash',         accountClass: 'Asset',     accountType: 'Cash',           isSystemAccount: true, isActive: true, isDefault: true,  icon: '💵', sortOrder: 3, parentCode: '1000' },
+  { code: '1010', name: 'UAE Bank Accounts',  accountClass: 'Asset',     accountType: 'Bank',           isSystemAccount: true, isActive: true, isDefault: false, icon: '🏦', sortOrder: 4, parentCode: '1000' },
+  { code: '1020', name: 'India Bank/UPI',     accountClass: 'Asset',     accountType: 'Bank',           isSystemAccount: true, isActive: true, isDefault: false, icon: '🏦', sortOrder: 5, parentCode: '1000' },
+  { code: '1100', name: 'Investments',        accountClass: 'Asset',     accountType: 'Group',          isSystemAccount: true, isActive: true, isDefault: false, icon: '📈', sortOrder: 6, parentCode: null },
+  { code: '1110', name: 'Mutual Funds / SIP', accountClass: 'Asset',     accountType: 'Investment',     isSystemAccount: true, isActive: true, isDefault: false, icon: '📊', sortOrder: 7, parentCode: '1100' },
+  { code: '1120', name: 'Fixed Deposits',     accountClass: 'Asset',     accountType: 'Investment',     isSystemAccount: true, isActive: true, isDefault: false, icon: '🔒', sortOrder: 8, parentCode: '1100' },
+  { code: '1130', name: 'Gold Holdings',      accountClass: 'Asset',     accountType: 'Investment',     isSystemAccount: true, isActive: true, isDefault: false, icon: '🪙', sortOrder: 9, parentCode: '1100' },
+  { code: '1200', name: 'Receivables',        accountClass: 'Asset',     accountType: 'Receivable',     isSystemAccount: true, isActive: true, isDefault: false, icon: '🤝', sortOrder: 10, parentCode: null },
+
+  // LIABILITIES — 2000s
+  { code: '2000', name: 'Current Liabilities', accountClass: 'Liability', accountType: 'Group',         isSystemAccount: true, isActive: true, isDefault: false, icon: '💳', sortOrder: 20, parentCode: null },
+  { code: '2001', name: 'Credit Cards',        accountClass: 'Liability', accountType: 'Credit Card',   isSystemAccount: true, isActive: true, isDefault: false, icon: '💳', sortOrder: 21, parentCode: '2000' },
+  { code: '2101', name: 'Tabby / BNPL',        accountClass: 'Liability', accountType: 'BNPL',          isSystemAccount: true, isActive: true, isDefault: false, icon: '🛍️', sortOrder: 22, parentCode: '2000' },
+  { code: '2100', name: 'Long-term Loans',     accountClass: 'Liability', accountType: 'Group',         isSystemAccount: true, isActive: true, isDefault: false, icon: '🏦', sortOrder: 23, parentCode: null },
+  { code: '2110', name: 'Personal Loans',      accountClass: 'Liability', accountType: 'Loan',          isSystemAccount: true, isActive: true, isDefault: false, icon: '🤝', sortOrder: 24, parentCode: '2100' },
+  { code: '2200', name: 'Personal Debts',      accountClass: 'Liability', accountType: 'Loan',          isSystemAccount: true, isActive: true, isDefault: false, icon: '👥', sortOrder: 25, parentCode: '2100' },
+
+  // EQUITY — 3000s
+  { code: '3001', name: 'Net Worth / Capital', accountClass: 'Equity',    accountType: 'Equity',        isSystemAccount: true, isActive: true, isDefault: true,  icon: '📊', sortOrder: 30, parentCode: null },
+
+  // INCOME — 4000s
+  { code: '4010', name: 'Salary Income',       accountClass: 'Income',    accountType: 'Primary',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '💼', sortOrder: 40, parentCode: null },
+  { code: '4020', name: 'Freelance Income',    accountClass: 'Income',    accountType: 'Secondary',     isSystemAccount: true, isActive: true, isDefault: true,  icon: '🧑‍💻', sortOrder: 41, parentCode: null },
+  { code: '4030', name: 'Business Income',     accountClass: 'Income',    accountType: 'Secondary',     isSystemAccount: true, isActive: true, isDefault: false, icon: '🏢', sortOrder: 42, parentCode: null },
+  { code: '4040', name: 'Investment Returns',  accountClass: 'Income',    accountType: 'Passive',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '📈', sortOrder: 43, parentCode: null },
+  { code: '4050', name: 'Rental Income',       accountClass: 'Income',    accountType: 'Passive',       isSystemAccount: true, isActive: true, isDefault: false, icon: '🏠', sortOrder: 44, parentCode: null },
+  { code: '4060', name: 'Gift / Bonus',        accountClass: 'Income',    accountType: 'Other',         isSystemAccount: true, isActive: true, isDefault: true,  icon: '🎁', sortOrder: 45, parentCode: null },
+  { code: '4090', name: 'Other Income',        accountClass: 'Income',    accountType: 'Other',         isSystemAccount: true, isActive: true, isDefault: true,  icon: '➕', sortOrder: 46, parentCode: null },
+
+  // EXPENSES — 5000s
+  { code: '5010', name: 'Rent / Accommodation', accountClass: 'Expense', accountType: 'Fixed',          isSystemAccount: true, isActive: true, isDefault: true,  icon: '🏠', sortOrder: 50, parentCode: null },
+  { code: '5020', name: 'Food & Dining',        accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '🍔', sortOrder: 51, parentCode: null },
+  { code: '5030', name: 'Transport / Fuel',     accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '🚗', sortOrder: 52, parentCode: null },
+  { code: '5040', name: 'Bank Fees & Charges',  accountClass: 'Expense', accountType: 'Fixed',          isSystemAccount: true, isActive: true, isDefault: true,  icon: '🏧', sortOrder: 53, parentCode: null },
+  { code: '5050', name: 'Forex / Exchange',     accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: false, icon: '💱', sortOrder: 54, parentCode: null },
+  { code: '5060', name: 'Medical / Health',     accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '🏥', sortOrder: 55, parentCode: null },
+  { code: '5070', name: 'Education',            accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '📚', sortOrder: 56, parentCode: null },
+  { code: '5080', name: 'Shopping',             accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '🛍️', sortOrder: 57, parentCode: null },
+  { code: '5081', name: 'Entertainment',        accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '🎬', sortOrder: 58, parentCode: null },
+  { code: '5082', name: 'Utilities (DEWA/etc)', accountClass: 'Expense', accountType: 'Fixed',          isSystemAccount: true, isActive: true, isDefault: true,  icon: '💡', sortOrder: 59, parentCode: null },
+  { code: '5083', name: 'Family Support',       accountClass: 'Expense', accountType: 'Fixed',          isSystemAccount: true, isActive: true, isDefault: true,  icon: '👨‍👩‍👧', sortOrder: 60, parentCode: null },
+  { code: '5084', name: 'Religious / Charity',  accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: false, icon: '🛐', sortOrder: 61, parentCode: null },
+  { code: '5085', name: 'EMI / Loan Payment',   accountClass: 'Expense', accountType: 'Fixed',          isSystemAccount: true, isActive: true, isDefault: true,  icon: '💳', sortOrder: 62, parentCode: null },
+  { code: '5086', name: 'Subscriptions',        accountClass: 'Expense', accountType: 'Fixed',          isSystemAccount: true, isActive: true, isDefault: false, icon: '📱', sortOrder: 63, parentCode: null },
+  { code: '5087', name: 'Travel',               accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: false, icon: '✈️', sortOrder: 64, parentCode: null },
+  { code: '5090', name: 'Other Expenses',       accountClass: 'Expense', accountType: 'Variable',       isSystemAccount: true, isActive: true, isDefault: true,  icon: '➕', sortOrder: 99, parentCode: null },
+];
+
+// ─── CRUD Operations ────────────────────────────────────────────────────────
+
+/**
+ * Initialize default Chart of Accounts for new user
+ * Idempotent — won't duplicate if already exists
+ */
+export async function initializeChartOfAccounts(userId: string): Promise<number> {
+  if (!userId) return 0;
+
+  // Check if already initialized
+  const existing = await getDocs(
+    query(collection(db, 'glAccounts'), where('userId', '==', userId))
+  );
+  if (!existing.empty) {
+    console.log('[CoA] Already initialized:', existing.size, 'accounts');
+    return 0;
+  }
+
+  // Batch create all defaults
+  const batch = writeBatch(db);
+  let count = 0;
+
+  for (const account of DEFAULT_GL_ACCOUNTS) {
+    const docRef = doc(collection(db, 'glAccounts'));
+    batch.set(docRef, {
+      ...account,
+      userId,
+      createdAt: serverTimestamp(),
+    });
+    count++;
+  }
+
+  await batch.commit();
+  console.log('[CoA] Initialized', count, 'default accounts');
+  return count;
+}
+
+/**
+ * Listen to all GL accounts for a user
+ */
+export function listenGLAccounts(
+  userId: string,
+  callback: (accounts: GLAccount[]) => void
+): () => void {
+  const q = query(collection(db, 'glAccounts'), where('userId', '==', userId));
+  return onSnapshot(q, snap => {
+    const accounts = snap.docs.map(d => ({ id: d.id, ...d.data() } as GLAccount));
+    // Sort by code
+    accounts.sort((a, b) => a.code.localeCompare(b.code));
+    callback(accounts);
+  });
+}
+
+/**
+ * Add a new custom GL account
+ */
+export async function addGLAccount(account: Omit<GLAccount, 'id' | 'createdAt'>): Promise<string> {
+  const docRef = await addDoc(collection(db, 'glAccounts'), {
+    ...account,
+    isSystemAccount: false,  // user-created
+    createdAt: serverTimestamp(),
+  });
+  return docRef.id;
+}
+
+/**
+ * Update an existing GL account
+ */
+export async function updateGLAccount(id: string, data: Partial<GLAccount>): Promise<void> {
+  await updateDoc(doc(db, 'glAccounts', id), {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Soft delete (set isActive: false)
+ * System accounts cannot be deleted
+ */
+export async function deactivateGLAccount(id: string, isSystem: boolean): Promise<void> {
+  if (isSystem) {
+    throw new Error('System accounts cannot be deleted. You can rename it instead.');
+  }
+  await updateDoc(doc(db, 'glAccounts', id), {
+    isActive: false,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Reactivate a soft-deleted account
+ */
+export async function reactivateGLAccount(id: string): Promise<void> {
+  await updateDoc(doc(db, 'glAccounts', id), {
+    isActive: true,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Calculate balance for a GL account from transactions
+ */
+export function calculateGLAccountBalance(
+  account: GLAccount,
+  transactions: Transaction[]
+): number {
+  let debits = 0;
+  let credits = 0;
+
+  transactions.forEach(tx => {
+    if (tx.isReversed) return;
+    if (tx.debitAccountId === account.code) debits += tx.amount;
+    if (tx.creditAccountId === account.code) credits += tx.amount;
+  });
+
+  // Asset/Expense: Debit increases balance
+  // Liability/Income/Equity: Credit increases balance
+  if (account.accountClass === 'Asset' || account.accountClass === 'Expense') {
+    return debits - credits;
+  } else {
+    return credits - debits;
+  }
+}
+
+/**
+ * Get next available code in a class
+ * e.g. if 5010, 5020, 5030 exist → returns "5031"
+ */
+export function getNextAccountCode(
+  accountClass: AccountClass,
+  existingAccounts: GLAccount[]
+): string {
+  const prefix: Record<AccountClass, string> = {
+    Asset: '1',
+    Liability: '2',
+    Equity: '3',
+    Income: '4',
+    Expense: '5',
+  };
+
+  const startRange = prefix[accountClass] + '000';
+  const endRange = prefix[accountClass] + '999';
+
+  const codesInClass = existingAccounts
+    .filter(a => a.code >= startRange && a.code <= endRange)
+    .map(a => parseInt(a.code))
+    .sort((a, b) => b - a);
+
+  if (codesInClass.length === 0) {
+    return prefix[accountClass] + '001';
+  }
+
+  const highest = codesInClass[0];
+  return String(highest + 1).padStart(4, '0');
+}
+
+/**
+ * Get accounts filtered by class
+ */
+export function getAccountsByClass(
+  accounts: GLAccount[],
+  accountClass: AccountClass,
+  activeOnly = true
+): GLAccount[] {
+  return accounts
+    .filter(a => a.accountClass === accountClass)
+    .filter(a => !activeOnly || a.isActive)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+}
+
+/**
+ * Build account hierarchy tree
+ */
+export function buildAccountTree(accounts: GLAccount[]): Map<string, GLAccount[]> {
+  const tree = new Map<string, GLAccount[]>();
+  accounts.forEach(acc => {
+    const parent = acc.parentCode || 'root';
+    if (!tree.has(parent)) tree.set(parent, []);
+    tree.get(parent)!.push(acc);
+  });
+  return tree;
+}

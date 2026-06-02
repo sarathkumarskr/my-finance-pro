@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import {
   BrowserRouter,
@@ -11,21 +12,12 @@ import type { User } from 'firebase/auth';
 import { auth } from './firebaseConfig';
 import Login from './pages/Login';
 import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import Expenses from './pages/Expenses';
-import Income from './pages/Income';
-import Budget from './pages/Budget';
-import Reports from './pages/Reports';
-import Settings from './pages/Settings';
-import Cards from './pages/Cards';
-import Debts from './pages/Debts';
-import Health from './pages/Health';
-import Remittance from './pages/Remittance';
-import Savings from './pages/Savings';
 
 interface AppProps {
   onReady?: () => void;
 }
+
+// ─── Splash Spinner ───────────────────────────────────────────────────────────
 
 function Spinner() {
   return (
@@ -86,6 +78,8 @@ function Spinner() {
   );
 }
 
+// ─── Protected Route Guard ────────────────────────────────────────────────────
+
 function ProtectedRoute({
   user,
   children,
@@ -100,6 +94,8 @@ function ProtectedRoute({
   return <>{children}</>;
 }
 
+// ─── Main App ─────────────────────────────────────────────────────────────────
+
 export default function App({ onReady }: AppProps) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -113,6 +109,7 @@ export default function App({ onReady }: AppProps) {
     }
   }
 
+  // Online/offline detection
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
     const goOffline = () => setIsOnline(false);
@@ -124,6 +121,7 @@ export default function App({ onReady }: AppProps) {
     };
   }, []);
 
+  // Auth state listener
   useEffect(() => {
     timeoutRef.current = setTimeout(() => {
       console.warn('[Auth] Timeout! Showing login.');
@@ -162,6 +160,7 @@ export default function App({ onReady }: AppProps) {
     };
   }, []);
 
+  // Re-check on tab focus
   useEffect(() => {
     const check = () => {
       if (document.visibilityState === 'visible') {
@@ -172,6 +171,7 @@ export default function App({ onReady }: AppProps) {
     return () => document.removeEventListener('visibilitychange', check);
   }, []);
 
+  // Loading state
   if (user === undefined) {
     return <Spinner />;
   }
@@ -199,65 +199,20 @@ export default function App({ onReady }: AppProps) {
       )}
 
       <Routes>
+        {/* Login route */}
         <Route
           path="/login"
           element={
             user ? <Navigate to="/" replace /> : <Login user={null} />
           }
         />
+
+        {/* All other routes go through Layout (which has its own routes inside) */}
         <Route
           path="/*"
           element={
             <ProtectedRoute user={user}>
-              <Layout user={user as User}>
-                <Routes>
-                  <Route
-                    path="/"
-                    element={<Dashboard user={user as User} />}
-                  />
-                  <Route
-                    path="/expenses"
-                    element={<Expenses user={user as User} />}
-                  />
-                  <Route
-                    path="/income"
-                    element={<Income user={user as User} />}
-                  />
-                  <Route
-                    path="/budget"
-                    element={<Budget user={user as User} />}
-                  />
-                  <Route
-                    path="/reports"
-                    element={<Reports user={user as User} />}
-                  />
-                  <Route
-                    path="/settings"
-                    element={<Settings user={user as User} />}
-                  />
-                  <Route
-                    path="/cards"
-                    element={<Cards user={user as User} />}
-                  />
-                  <Route
-                    path="/debts"
-                    element={<Debts user={user as User} />}
-                  />
-                  <Route
-                    path="/health"
-                    element={<Health user={user as User} />}
-                  />
-                  <Route
-                    path="/remittance"
-                    element={<Remittance user={user as User} />}
-                  />
-                  <Route
-                    path="/savings"
-                    element={<Savings user={user as User} />}
-                  />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </Layout>
+              <Layout user={user as User} />
             </ProtectedRoute>
           }
         />

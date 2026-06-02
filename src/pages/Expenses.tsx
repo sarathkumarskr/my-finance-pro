@@ -19,9 +19,11 @@ import {
   buildTabbyProSchedule,
   canTabbyPurchase,
   isTabbyProEnabled,
-  formatCurrency,
+  listenGLAccounts,
 } from '../firestoreHelpers';
-import type { TabbyPurchaseEMI } from '../firestoreHelpers';
+import type { TabbyPurchaseEMI, GLAccount } from '../firestoreHelpers';
+import SmartCategoryPicker from '../components/SmartCategoryPicker';
+import SubCategoryInput from '../components/SubCategoryInput';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,7 +32,8 @@ interface Transaction {
   type: 'income' | 'expense' | 'transfer';
   amount: number;
   currency: 'AED' | 'INR';
-  category: string;
+  category: string;        // now stores GL code (e.g. "5020")
+  categoryName?: string;   // human-readable for display
   subCategory?: string | null;
   date: string;
   paymentMethodId?: string;
@@ -57,22 +60,12 @@ interface PaymentMethod {
   tabbyEmis?: TabbyPurchaseEMI[];
   statementDate?: number;
   dueDate?: number;
+  isDeleted?: boolean;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DEFAULT_CATEGORIES = [
-  'Rent', 'Food', 'Transport', 'Shopping', 'Medical',
-  'Education', 'Entertainment', 'Utilities', 'Bank Fees', 'Other',
-];
-
 const cardTypeIcon: Record<string, string> = {
-  credit: '💳',
-  debit:  '🏦',
-  tabby:  '🛒',
-  cash:   '💵',
-  upi:    '📱',
-  custom: '➕',
+  credit: '💳', debit: '🏦', tabby: '🛍️',
+  cash: '💵', upi: '📱', custom: '➕',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -98,25 +91,10 @@ const labelStyle: React.CSSProperties = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function pad2(n: number) { return String(n).padStart(2, '0'); }
-
 function getToday() {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
-
-function getExpenseGLAccount(cat: string): string {
-  const c = cat.toLowerCase();
-  if (c.includes('rent') || c.includes('accommodation')) return '5010';
-  if (c.includes('food') || c.includes('dining'))         return '5020';
-  if (c.includes('transport') || c.includes('fuel'))      return '5030';
-  if (c.includes('fee') || c.includes('bank') || c.includes('charge')) return '5040';
-  if (c.includes('forex') || c.includes('exchange'))      return '5050';
-  if (c.includes('medical') || c.includes('health'))      return '5060';
-  if (c.includes('education') || c.includes('school'))    return '5070';
-  if (c.includes('entertainment'))                        return '5080';
-  return '5090';
-}
-
 function fmtAED(n: number) {
   return `AED ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -126,22 +104,16 @@ function fmtAED(n: number) {
 interface TabbyPreviewBannerProps {
   amount: number;
   date: string;
-  category: string;
+  categoryName: string;
   method: PaymentMethod;
 }
 
-function TabbyPreviewBanner({ amount, date, category, method }: TabbyPreviewBannerProps) {
+function TabbyPreviewBanner({ amount, date, categoryName, method }: TabbyPreviewBannerProps) {
   if (!isTabbyProEnabled(method) || amount <= 0 || !date) return null;
-
   const check = canTabbyPurchase(method, amount);
   const stmtDay = method.statementDate || 23;
-  const dueDay  = method.dueDate || 3;
-
-  // Build preview schedule
-  const preview = buildTabbyProSchedule(
-    amount, date, category || 'Purchase',
-    'preview', stmtDay, dueDay
-  );
+  const dueDay = method.dueDate || 3;
+  const preview = buildTabbyProSchedule(amount, date, categoryName || 'Purchase', 'preview', stmtDay, dueDay);
 
   if (!check.allowed) {
     return (
@@ -155,7 +127,7 @@ function TabbyPreviewBanner({ amount, date, category, method }: TabbyPreviewBann
         </div>
         <div style={{ fontSize: 13, color: 'var(--muted)' }}>
           Available: <strong>{fmtAED(check.available)}</strong>
-          {' '}&bull;{' '}
+          {' '}•{' '}
           Trying: <strong>{fmtAED(amount)}</strong>
         </div>
       </div>
@@ -168,7 +140,6 @@ function TabbyPreviewBanner({ amount, date, category, method }: TabbyPreviewBann
       background: 'rgba(139,92,246,0.08)',
       border: '1px dashed rgba(139,92,246,0.4)',
     }}>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 18 }}>💳</span>
         <div>
@@ -176,12 +147,10 @@ function TabbyPreviewBanner({ amount, date, category, method }: TabbyPreviewBann
             Tabby Pro — Auto Split into 4 Installments
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            Zero interest &bull; Zero fees
+            Zero interest • Zero fees
           </div>
         </div>
       </div>
-
-      {/* 4 installment boxes */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
         {preview.installments.map((inst, i) => (
           <div key={i} style={{
@@ -201,12 +170,8 @@ function TabbyPreviewBanner({ amount, date, category, method }: TabbyPreviewBann
           </div>
         ))}
       </div>
-
-      {/* Footer info */}
       <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
-        <span>
-          📊 Full expense posted today &bull; Payments spread over 4 months
-        </span>
+        <span>📊 Full expense posted today • Payments spread over 4 months</span>
         <span style={{ color: '#8b5cf6', fontWeight: 600 }}>
           Avail after: {fmtAED(check.available - amount)}
         </span>
@@ -219,36 +184,33 @@ function TabbyPreviewBanner({ amount, date, category, method }: TabbyPreviewBann
 
 export default function Expenses({ user }: { user: User }) {
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [transactions,    setTransactions]    = useState<Transaction[]>([]);
-  const [paymentMethods,  setPaymentMethods]  = useState<PaymentMethod[]>([]);
-  const [filterCountry,   setFilterCountry]   = useState<'ALL' | 'UAE' | 'India'>('ALL');
-  const [filterCategory,  setFilterCategory]  = useState<string>('ALL');
-  const [isModalOpen,     setIsModalOpen]     = useState(false);
-  const [editingId,       setEditingId]       = useState<string | null>(null);
-  const [loading,         setLoading]         = useState(true);
-  const [saving,          setSaving]          = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [glAccounts, setGlAccounts] = useState<GLAccount[]>([]);
+  const [filterCountry, setFilterCountry] = useState<'ALL' | 'UAE' | 'India'>('ALL');
+  const [filterCategory, setFilterCategory] = useState<string>('ALL');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   // Form state
-  const [amount,          setAmount]          = useState('');
-  const [currency,        setCurrency]        = useState<'AED' | 'INR'>('AED');
-  const [category,        setCategory]        = useState('Food');
-  const [subCategory,     setSubCategory]     = useState('');
-  const [date,            setDate]            = useState(getToday());
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState<'AED' | 'INR'>('AED');
+  const [categoryCode, setCategoryCode] = useState('');   // GL code
+  const [categoryName, setCategoryName] = useState('');   // for display
+  const [subCategory, setSubCategory] = useState('');
+  const [date, setDate] = useState(getToday());
   const [paymentMethodId, setPaymentMethodId] = useState('');
-  const [note,            setNote]            = useState('');
+  const [note, setNote] = useState('');
 
-  // Tabby preview state
   const [tabbyLimitError, setTabbyLimitError] = useState<string | null>(null);
 
   // ── Listeners ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!user?.uid) return;
-    const q = query(
-      collection(db, 'paymentMethods'),
-      where('userId', '==', user.uid)
-    );
+    const q = query(collection(db, 'paymentMethods'), where('userId', '==', user.uid));
     return onSnapshot(q, snap => {
       setPaymentMethods(
         snap.docs
@@ -268,25 +230,20 @@ export default function Expenses({ user }: { user: User }) {
     return onSnapshot(q, snap => {
       const list = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as Transaction))
-        .filter(t => t.date && !t.isReversed)          // ← FIXED: exclude reversed
+        .filter(t => t.date && !t.isReversed)
         .sort((a, b) => String(b.date).localeCompare(String(a.date)));
       setTransactions(list);
       setLoading(false);
     }, () => setLoading(false));
   }, [user.uid]);
 
+  // GL Accounts listener (for category dropdown)
+  useEffect(() => {
+    if (!user?.uid) return;
+    return listenGLAccounts(user.uid, setGlAccounts);
+  }, [user?.uid]);
+
   // ── Derived ────────────────────────────────────────────────────────────────
-
-  const uniqueCategories = Array.from(new Set([
-    ...DEFAULT_CATEGORIES,
-    ...transactions.map(t => t.category).filter(Boolean),
-  ]));
-
-  const uniqueSubCategories = Array.from(new Set(
-    transactions
-      .filter(t => t.category === category && t.subCategory)
-      .map(t => t.subCategory as string)
-  ));
 
   const modalMethods = paymentMethods.filter(pm =>
     currency === 'AED'
@@ -294,19 +251,18 @@ export default function Expenses({ user }: { user: User }) {
       : pm.country === 'India' || pm.country === 'Both'
   );
 
-  // Selected method (for Tabby detection)
   const selectedMethod = paymentMethods.find(m => m.id === paymentMethodId) || null;
-  const isTabbyPro     = selectedMethod ? isTabbyProEnabled(selectedMethod) : false;
-  const amountNum      = parseFloat(amount) || 0;
+  const isTabbyPro = selectedMethod ? isTabbyProEnabled(selectedMethod) : false;
+  const amountNum = parseFloat(amount) || 0;
 
-  // Auto-select first method when currency changes
+  // Auto-select first method
   useEffect(() => {
     if (modalMethods.length > 0 && !paymentMethodId && !editingId) {
       setPaymentMethodId(modalMethods[0].id);
     }
   }, [currency, modalMethods.length, editingId]);
 
-  // Tabby limit check on amount/method change
+  // Tabby limit check
   useEffect(() => {
     if (isTabbyPro && selectedMethod && amountNum > 0) {
       const check = canTabbyPurchase(selectedMethod, amountNum);
@@ -316,27 +272,27 @@ export default function Expenses({ user }: { user: User }) {
     }
   }, [isTabbyPro, amountNum, paymentMethodId]);
 
-  // Filtered transactions
+  // Filtered list
   const filteredTransactions = transactions.filter(t => {
     if (filterCountry !== 'ALL' && t.country !== filterCountry) return false;
     if (filterCategory !== 'ALL' && t.category !== filterCategory) return false;
     return true;
   });
 
-  // Summary totals (not filtered by category so totals stay accurate)
+  // Totals
   const totalAED = transactions
     .filter(t => t.currency === 'AED' && (filterCountry === 'ALL' || t.country === filterCountry))
     .reduce((s, t) => s + t.amount, 0);
-
   const totalINR = transactions
     .filter(t => t.currency === 'INR' && (filterCountry === 'ALL' || t.country === filterCountry))
     .reduce((s, t) => s + t.amount, 0);
 
-  // Category breakdown for quick filter
+  // Top categories for filter chips
   const categoryTotals = transactions
     .filter(t => filterCountry === 'ALL' || t.country === filterCountry)
     .reduce((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + t.amount;
+      const key = t.categoryName || t.category;
+      acc[key] = (acc[key] || 0) + t.amount;
       return acc;
     }, {} as Record<string, number>);
 
@@ -344,11 +300,21 @@ export default function Expenses({ user }: { user: User }) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
 
-  // ── Modal Handlers ─────────────────────────────────────────────────────────
+  // Get account display info
+  const getAccountDisplay = (code: string): { icon: string; name: string } => {
+    const acc = glAccounts.find(a => a.code === code);
+    return {
+      icon: acc?.icon || '📋',
+      name: acc?.name || code,
+    };
+  };
+
+  // ── Modal handlers ─────────────────────────────────────────────────────────
 
   const openAddModal = () => {
     setEditingId(null);
-    setAmount(''); setCurrency('AED'); setCategory('Food');
+    setAmount(''); setCurrency('AED');
+    setCategoryCode(''); setCategoryName('');
     setSubCategory(''); setDate(getToday()); setPaymentMethodId('');
     setNote(''); setTabbyLimitError(null);
     setIsModalOpen(true);
@@ -358,7 +324,8 @@ export default function Expenses({ user }: { user: User }) {
     setEditingId(tx.id);
     setAmount(tx.amount.toString());
     setCurrency(tx.currency);
-    setCategory(tx.category);
+    setCategoryCode(tx.category);
+    setCategoryName(tx.categoryName || getAccountDisplay(tx.category).name);
     setSubCategory(tx.subCategory || '');
     setDate(tx.date);
     setPaymentMethodId(tx.paymentMethodId || '');
@@ -369,98 +336,80 @@ export default function Expenses({ user }: { user: User }) {
 
   const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
 
+  const handleCategoryChange = (code: string, account: GLAccount) => {
+    setCategoryCode(code);
+    setCategoryName(account.name);
+  };
+
   // ── Submit ─────────────────────────────────────────────────────────────────
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     const val = parseFloat(amount);
     if (!amount || isNaN(val) || val <= 0) { toast.error('Enter a valid amount'); return; }
     if (!paymentMethodId) { toast.error('Please select a payment method'); return; }
-    if (!category.trim()) { toast.error('Please enter a category'); return; }
+    if (!categoryCode) { toast.error('Please select a category'); return; }
 
-    // Tabby limit check
     if (isTabbyPro && selectedMethod) {
       const check = canTabbyPurchase(selectedMethod, val);
-      if (!check.allowed) {
-        toast.error(check.message || 'Tabby limit exceeded');
-        return;
-      }
+      if (!check.allowed) { toast.error(check.message || 'Tabby limit exceeded'); return; }
     }
 
     setSaving(true);
-
-    const selectedPM      = paymentMethods.find(m => m.id === paymentMethodId);
-    const debitAccountId  = getExpenseGLAccount(category);
-    const creditAccountId = paymentMethodId;
+    const selectedPM = paymentMethods.find(m => m.id === paymentMethodId);
 
     const payload = {
-      userId:            user.uid,
-      type:              'expense' as const,
-      amount:            val,
+      userId: user.uid,
+      type: 'expense' as const,
+      amount: val,
       currency,
-      category:          category.trim(),
-      subCategory:       subCategory.trim() || null,
+      category: categoryCode,        // GL code stored
+      categoryName: categoryName,    // human-readable
+      subCategory: subCategory.trim() || null,
       date,
       paymentMethodId,
-      paymentMethod:     selectedPM?.type   || null,
-      paymentMethodName: selectedPM?.name   || null,
-      paymentMethodType: selectedPM?.type   || null,
-      note:              note.trim() || null,
-      country:           (currency === 'AED' ? 'UAE' : 'India') as 'UAE' | 'India',
-      debitAccountId,
-      creditAccountId,
-      updatedAt:         Timestamp.now(),
+      paymentMethod: selectedPM?.type || null,
+      paymentMethodName: selectedPM?.name || null,
+      paymentMethodType: selectedPM?.type || null,
+      note: note.trim() || null,
+      country: (currency === 'AED' ? 'UAE' : 'India') as 'UAE' | 'India',
+      debitAccountId: categoryCode,           // GL expense account
+      creditAccountId: paymentMethodId,       // payment method
+      updatedAt: Timestamp.now(),
     };
 
     try {
       if (editingId) {
-        // ── Edit: direct update ──────────────────────────────────────────────
         await updateDoc(doc(db, 'transactions', editingId), payload);
         toast.success('Expense updated');
       } else {
-        // ── New expense ──────────────────────────────────────────────────────
         const txRef = await addDoc(collection(db, 'transactions'), {
-          ...payload,
-          createdAt: Timestamp.now(),
+          ...payload, createdAt: Timestamp.now(),
         });
 
-        // ── Tabby Pro: auto-create installment schedule ──────────────────────
+        // Tabby Pro auto-EMI
         if (isTabbyPro && selectedMethod && selectedPM) {
           try {
-            const stmtDay  = selectedMethod.statementDate || 23;
-            const dueDay   = selectedMethod.dueDate || 3;
-
-            const schedule = buildTabbyProSchedule(
-              val,
-              date,
-              category.trim(),
-              txRef.id,
-              stmtDay,
-              dueDay
-            );
-
+            const stmtDay = selectedMethod.statementDate || 23;
+            const dueDay = selectedMethod.dueDate || 3;
+            const schedule = buildTabbyProSchedule(val, date, categoryName, txRef.id, stmtDay, dueDay);
             const existingEmis = (selectedMethod.tabbyEmis || []) as TabbyPurchaseEMI[];
-
             await updateDoc(doc(db, 'paymentMethods', selectedMethod.id), {
               tabbyEmis: [...existingEmis, schedule],
               updatedAt: Timestamp.now(),
             });
-
             toast.success(
               `💳 Tabby Pro: ${fmtAED(val)} split into 4 × ${fmtAED(schedule.emiAmount)}`,
-              { duration: 5000, icon: '🛒' }
+              { duration: 5000, icon: '🛍️' }
             );
           } catch (tabbyErr) {
             console.error('Tabby EMI creation failed:', tabbyErr);
-            // Expense still posted — just warn about EMI
-            toast.error('Expense posted but Tabby schedule failed. Check Cards page.');
+            toast.error('Expense posted but Tabby schedule failed.');
           }
         } else {
-          toast.success('Expense posted to ledger');
+          toast.success('Expense posted');
         }
       }
-
       closeModal();
     } catch (err) {
       console.error('Expense save error:', err);
@@ -470,32 +419,23 @@ export default function Expenses({ user }: { user: User }) {
     }
   };
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
-
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this expense?')) return;
     try {
-      // Check if it's a Tabby transaction — warn user
       const tx = transactions.find(t => t.id === id);
       if (tx?.paymentMethodType === 'tabby') {
         const confirmed = window.confirm(
           'This is a Tabby purchase. Deleting will also remove the linked installment schedule. Continue?'
         );
         if (!confirmed) return;
-
-        // Remove linked Tabby EMI
         const tabbyMethod = paymentMethods.find(m => m.id === tx.paymentMethodId);
         if (tabbyMethod?.tabbyEmis) {
-          const updatedEmis = tabbyMethod.tabbyEmis.filter(
-            emi => emi.sourceTransactionId !== id
-          );
+          const updatedEmis = tabbyMethod.tabbyEmis.filter(emi => emi.sourceTransactionId !== id);
           await updateDoc(doc(db, 'paymentMethods', tabbyMethod.id), {
-            tabbyEmis: updatedEmis,
-            updatedAt: Timestamp.now(),
+            tabbyEmis: updatedEmis, updatedAt: Timestamp.now(),
           });
         }
       }
-
       await deleteDoc(doc(db, 'transactions', id));
       toast.success('Expense deleted');
     } catch (err) {
@@ -509,7 +449,7 @@ export default function Expenses({ user }: { user: User }) {
   return (
     <div style={{ padding: '22px 16px 100px', maxWidth: 900, margin: '0 auto', color: 'var(--text)' }}>
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
         <div>
           <div style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 800, letterSpacing: 0.5 }}>ERP LEDGER</div>
@@ -522,7 +462,7 @@ export default function Expenses({ user }: { user: User }) {
         </button>
       </div>
 
-      {/* ── Summary Cards ── */}
+      {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 20 }}>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderLeft: '3px solid #ef4444', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700, marginBottom: 4 }}>UAE EXPENSES</div>
@@ -538,7 +478,7 @@ export default function Expenses({ user }: { user: User }) {
         </div>
       </div>
 
-      {/* ── Top Categories Quick Filter ── */}
+      {/* Top Categories filter */}
       {topCategories.length > 0 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', paddingBottom: 4 }}>
           <button
@@ -551,26 +491,33 @@ export default function Expenses({ user }: { user: User }) {
               fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
             }}
           >
-            All Categories
+            All
           </button>
-          {topCategories.map(([cat]) => (
-            <button key={cat}
-              onClick={() => setFilterCategory(cat)}
-              style={{
-                padding: '6px 14px', borderRadius: 20, border: '1px solid',
-                borderColor: filterCategory === cat ? 'var(--danger)' : 'var(--border)',
-                background: filterCategory === cat ? 'rgba(239,68,68,0.1)' : 'transparent',
-                color: filterCategory === cat ? 'var(--danger)' : 'var(--muted)',
-                fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
-              }}
-            >
-              {cat}
-            </button>
-          ))}
+          {topCategories.map(([catName]) => {
+            // Find code by name (reverse lookup)
+            const acc = glAccounts.find(a => a.name === catName);
+            const filterValue = acc?.code || catName;
+            return (
+              <button key={catName}
+                onClick={() => setFilterCategory(filterValue)}
+                style={{
+                  padding: '6px 14px', borderRadius: 20, border: '1px solid',
+                  borderColor: filterCategory === filterValue ? 'var(--danger)' : 'var(--border)',
+                  background: filterCategory === filterValue ? 'rgba(239,68,68,0.1)' : 'transparent',
+                  color: filterCategory === filterValue ? 'var(--danger)' : 'var(--muted)',
+                  fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                {acc?.icon && <span>{acc.icon}</span>}
+                {catName}
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {/* ── Country Filter Tabs ── */}
+      {/* Country Filter */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: 'var(--card)', padding: 6, borderRadius: 12, border: '1px solid var(--border)', width: 'fit-content' }}>
         {(['ALL', 'UAE', 'India'] as const).map(c => (
           <button key={c}
@@ -582,12 +529,12 @@ export default function Expenses({ user }: { user: User }) {
               cursor: 'pointer', fontSize: 13, fontWeight: 800,
             }}
           >
-            {c === 'ALL' ? '\uD83C\uDF0D All' : c === 'UAE' ? '🇦🇪 UAE' : '🇮🇳 India'}
+            {c === 'ALL' ? '🌍 All' : c === 'UAE' ? '🇦🇪 UAE' : '🇮🇳 India'}
           </button>
         ))}
       </div>
 
-      {/* ── Transaction List ── */}
+      {/* List */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: 42, color: 'var(--muted)', background: 'var(--card)', borderRadius: 18, border: '1px solid var(--border)' }}>
           <RefreshCw size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: 8 }} />
@@ -601,77 +548,74 @@ export default function Expenses({ user }: { user: User }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-          {filteredTransactions.map(tx => (
-            <div key={tx.id} style={{
-              background: 'var(--card)', border: '1px solid var(--border)',
-              borderRadius: 17, padding: '14px 16px',
-              display: 'flex', flexWrap: 'wrap', alignItems: 'center',
-              justifyContent: 'space-between', gap: 14,
-              borderLeft: tx.paymentMethodType === 'tabby' ? '3px solid #8b5cf6' : '1px solid var(--border)',
-            }}>
-              {/* Left */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 220, flex: 1 }}>
-                <div style={{
-                  width: 42, height: 42, borderRadius: 14, flexShrink: 0, fontSize: 18,
-                  background: tx.paymentMethodType === 'tabby'
-                    ? 'rgba(139,92,246,0.12)' : 'rgba(239,68,68,0.12)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {cardTypeIcon[tx.paymentMethod || tx.paymentMethodType || ''] || '💳'}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {tx.category}
-                    {tx.subCategory && (
-                      <span style={{ opacity: 0.6, fontSize: 13, fontWeight: 700 }}>
-                        {' › '}{tx.subCategory}
-                      </span>
-                    )}
+          {filteredTransactions.map(tx => {
+            const display = getAccountDisplay(tx.category);
+            return (
+              <div key={tx.id} style={{
+                background: 'var(--card)', border: '1px solid var(--border)',
+                borderRadius: 17, padding: '14px 16px',
+                display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+                justifyContent: 'space-between', gap: 14,
+                borderLeft: tx.paymentMethodType === 'tabby' ? '3px solid #8b5cf6' : '1px solid var(--border)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 220, flex: 1 }}>
+                  <div style={{
+                    width: 42, height: 42, borderRadius: 14, flexShrink: 0, fontSize: 18,
+                    background: tx.paymentMethodType === 'tabby' ? 'rgba(139,92,246,0.12)' : 'rgba(239,68,68,0.12)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {display.icon}
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {tx.paymentMethodName || 'Unknown'} &bull; {tx.date}
-                    {tx.paymentMethodType === 'tabby' && (
-                      <span style={{ marginLeft: 6, fontSize: 11, color: '#8b5cf6', fontWeight: 700 }}>
-                        💳 4x
-                      </span>
-                    )}
-                  </div>
-                  {tx.note && (
-                    <div style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--muted)', marginTop: 2 }}>
-                      &ldquo;{tx.note}&rdquo;
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {tx.categoryName || display.name}
+                      {tx.subCategory && (
+                        <span style={{ opacity: 0.6, fontSize: 13, fontWeight: 700 }}>
+                          {' › '}{tx.subCategory}
+                        </span>
+                      )}
                     </div>
-                  )}
+                    <div style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {tx.paymentMethodName || 'Unknown'} • {tx.date}
+                      {tx.paymentMethodType === 'tabby' && (
+                        <span style={{ marginLeft: 6, fontSize: 11, color: '#8b5cf6', fontWeight: 700 }}>
+                          💳 4x
+                        </span>
+                      )}
+                    </div>
+                    {tx.note && (
+                      <div style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--muted)', marginTop: 2 }}>
+                        "{tx.note}"
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto', flexShrink: 0 }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ color: 'var(--danger)', fontWeight: 900, fontSize: 16, whiteSpace: 'nowrap' }}>
+                      -{tx.currency === 'INR' ? '₹' : 'AED '}
+                      {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, fontWeight: 600 }}>{tx.country}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => openEditModal(tx)}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 6 }}>
+                      <Edit2 size={16} />
+                    </button>
+                    <button onClick={() => handleDelete(tx.id)}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 6 }}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               </div>
-
-              {/* Right */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto', flexShrink: 0 }}>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ color: 'var(--danger)', fontWeight: 900, fontSize: 16, whiteSpace: 'nowrap' }}>
-                    -{tx.currency === 'INR' ? '₹' : 'AED '}
-                    {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, fontWeight: 600 }}>{tx.country}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button onClick={() => openEditModal(tx)}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 6 }}
-                  >
-                    <Edit2 size={16} />
-                  </button>
-                  <button onClick={() => handleDelete(tx.id)}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 6 }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* ── Add / Edit Modal ── */}
+      {/* Modal */}
       {isModalOpen && (
         <div
           onClick={e => { if (e.target === e.currentTarget) closeModal(); }}
@@ -683,8 +627,6 @@ export default function Expenses({ user }: { user: User }) {
             maxHeight: '92vh', overflowY: 'auto',
             boxShadow: '0 -20px 50px rgba(0,0,0,0.3)',
           }}>
-
-            {/* Modal Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                 <div style={{
@@ -704,13 +646,11 @@ export default function Expenses({ user }: { user: User }) {
                 </div>
               </div>
               <button type="button" onClick={closeModal}
-                style={{ background: 'var(--bg)', border: 'none', borderRadius: 12, padding: 9, cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center' }}
-              >
+                style={{ background: 'var(--bg)', border: 'none', borderRadius: 12, padding: 9, cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center' }}>
                 <X size={20} />
               </button>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
               {/* Amount */}
@@ -768,43 +708,43 @@ export default function Expenses({ user }: { user: User }) {
                 )}
               </div>
 
-              {/* Tabby Pro Preview Banner */}
+              {/* Tabby Preview */}
               {isTabbyPro && amountNum > 0 && date && (
                 <TabbyPreviewBanner
-                  amount={amountNum}
-                  date={date}
-                  category={category}
-                  method={selectedMethod!}
+                  amount={amountNum} date={date}
+                  categoryName={categoryName} method={selectedMethod!}
                 />
               )}
-
-              {/* Tabby limit error */}
               {tabbyLimitError && (
                 <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', fontSize: 13, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Info size={14} /> {tabbyLimitError}
                 </div>
               )}
 
-              {/* Category + Sub Category */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div>
-                  <label style={labelStyle}>Category *</label>
-                  <input type="text" list="expense-cat-list" placeholder="e.g. Food" required
-                    value={category} onChange={e => setCategory(e.target.value)} style={inputStyle}
-                  />
-                  <datalist id="expense-cat-list">
-                    {uniqueCategories.map(c => <option key={c} value={c} />)}
-                  </datalist>
-                </div>
-                <div>
-                  <label style={labelStyle}>Sub Category</label>
-                  <input type="text" list="expense-subcat-list" placeholder="Optional"
-                    value={subCategory} onChange={e => setSubCategory(e.target.value)} style={inputStyle}
-                  />
-                  <datalist id="expense-subcat-list">
-                    {uniqueSubCategories.map(sc => <option key={sc} value={sc} />)}
-                  </datalist>
-                </div>
+              {/* Category — Smart Picker */}
+              <div>
+                <label style={labelStyle}>Category *</label>
+                <SmartCategoryPicker
+                  value={categoryCode}
+                  onChange={handleCategoryChange}
+                  accounts={glAccounts}
+                  accountClass="Expense"
+                  allowCreate={true}
+                  userId={user.uid}
+                  placeholder="Select expense category"
+                />
+              </div>
+
+              {/* Sub Category — Smart Input */}
+              <div>
+                <label style={labelStyle}>Sub Category (optional)</label>
+                <SubCategoryInput
+                  value={subCategory}
+                  onChange={setSubCategory}
+                  category={categoryCode}
+                  transactions={transactions}
+                  placeholder="e.g. Carrefour, Specific vendor..."
+                />
               </div>
 
               {/* Date */}
@@ -819,7 +759,7 @@ export default function Expenses({ user }: { user: User }) {
                 <input type="text" placeholder="Optional note..." value={note} onChange={e => setNote(e.target.value)} style={inputStyle} />
               </div>
 
-              {/* Tabby Pro info box (non-edit only) */}
+              {/* Tabby info */}
               {isTabbyPro && !editingId && (
                 <div style={{
                   padding: '10px 14px', borderRadius: 12, fontSize: 13,
@@ -829,7 +769,6 @@ export default function Expenses({ user }: { user: User }) {
                 }}>
                   <strong style={{ color: '#8b5cf6' }}>💳 Tabby Pro Active</strong>
                   <br />Full expense posted today. Tabby installment schedule auto-created.
-                  View schedule in Cards → Tabby.
                 </div>
               )}
 
@@ -849,19 +788,15 @@ export default function Expenses({ user }: { user: User }) {
                   : editingId
                   ? 'Update Expense'
                   : isTabbyPro
-                  ? '🛒 Post + Create Tabby Schedule'
+                  ? '🛍️ Post + Create Tabby Schedule'
                   : 'Post Expense'}
               </button>
-
             </form>
           </div>
         </div>
       )}
 
-      {/* Spin animation */}
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
