@@ -13,6 +13,7 @@ import { auth } from './firebaseConfig';
 import Login from './pages/Login';
 import Layout from './components/Layout';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
+import InstallPrompt from './components/InstallPrompt';
 
 interface AppProps {
   onReady?: () => void;
@@ -172,6 +173,21 @@ export default function App({ onReady }: AppProps) {
     return () => document.removeEventListener('visibilitychange', check);
   }, []);
 
+  // ── Detect PWA standalone mode (informational) ───────────────────────────
+  useEffect(() => {
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+
+    if (isStandalone) {
+      console.log('[PWA] Running in standalone mode ✅');
+      document.documentElement.setAttribute('data-pwa', 'true');
+    } else {
+      console.log('[PWA] Running in browser');
+      document.documentElement.setAttribute('data-pwa', 'false');
+    }
+  }, []);
+
   // ── Loading state ────────────────────────────────────────────────────────
   if (user === undefined) {
     return <Spinner />;
@@ -220,8 +236,11 @@ export default function App({ onReady }: AppProps) {
         />
       </Routes>
 
-      {/* 🆕 PWA Update Notification — shows toast when new version deployed */}
+      {/* 🔔 PWA Update Notification — toast when new version deployed */}
       <PWAUpdatePrompt />
+
+      {/* 📲 Install Prompt — smart banner to install as PWA */}
+      {user && <InstallPrompt />}
     </BrowserRouter>
   );
 }

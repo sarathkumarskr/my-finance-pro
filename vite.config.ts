@@ -11,44 +11,108 @@ export default defineConfig({
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       
       manifest: {
+        // ── App Identity ──
         name: 'My Finance Pro',
-        short_name: 'FinancePro',
-        description: 'UAE-India Personal Finance Tracker',
-        theme_color: '#0f1219',
-        background_color: '#0f1219',
-        display: 'standalone',
-        orientation: 'portrait',
+        short_name: 'Finance Pro',
+        description: 'UAE-India Personal ERP & Finance Tracker',
+        
+        // ── KEY: These remove URL bar ──
+        display: 'standalone',           // ← No browser UI
+        display_override: ['standalone', 'fullscreen'],  // ← Fallback options
+        
+        // ── Visual ──
+        theme_color: '#6366f1',          // Top bar color (Android)
+        background_color: '#0f1219',     // Splash screen bg
+        
+        // ── Orientation ──
+        orientation: 'portrait-primary',  // Or 'any' if you want rotation
+        
+        // ── Scope (important for routing) ──
         scope: '/',
-        start_url: '/',
+        start_url: '/?source=pwa',       // Track PWA opens
+        
+        // ── Categories ──
+        categories: ['finance', 'productivity', 'business'],
+        
+        // ── Language ──
+        lang: 'en',
+        dir: 'ltr',
+        
+        // ── Icons ──
         icons: [
           {
             src: '/icon-192.png',
             sizes: '192x192',
             type: 'image/png',
+            purpose: 'any',
           },
           {
             src: '/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable',
           },
           {
             src: '/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'maskable',
           },
         ],
+        
+        // ── Shortcuts (long-press app icon) ──
+        shortcuts: [
+          {
+            name: 'Add Expense',
+            short_name: 'Expense',
+            description: 'Quickly add an expense',
+            url: '/expenses?action=add',
+            icons: [{ src: '/icon-192.png', sizes: '192x192' }],
+          },
+          {
+            name: 'Add Income',
+            short_name: 'Income',
+            description: 'Record income',
+            url: '/income?action=add',
+            icons: [{ src: '/icon-192.png', sizes: '192x192' }],
+          },
+          {
+            name: 'View Reports',
+            short_name: 'Reports',
+            description: 'See financial reports',
+            url: '/reports',
+            icons: [{ src: '/icon-192.png', sizes: '192x192' }],
+          },
+        ],
+        
+        // ── Screenshots (Android install dialog) ──
+        screenshots: [
+          {
+            src: '/screenshot-mobile.png',
+            sizes: '720x1280',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: 'Dashboard view',
+          },
+        ],
+        
+        // ── Prevent browser fallback ──
+        prefer_related_applications: false,
       },
       
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
         cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         
-        // 🔥 KEY ADDITIONS — force instant updates
-        clientsClaim: true,           // ← Take control of all tabs immediately
-        skipWaiting: true,            // ← Don't wait for old SW to finish
-        
-        // Network-first for API calls (always fresh data)
+        // Network-first for live data
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/firestore\.googleapis\.com/,
@@ -58,7 +122,7 @@ export default defineConfig({
               networkTimeoutSeconds: 5,
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 60 * 5, // 5 minutes
+                maxAgeSeconds: 60 * 5,
               },
             },
           },
@@ -69,7 +133,7 @@ export default defineConfig({
               cacheName: 'firebase-storage',
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+                maxAgeSeconds: 60 * 60 * 24 * 7,
               },
             },
           },
@@ -83,9 +147,8 @@ export default defineConfig({
         ],
       },
       
-      // 🆕 Show update notification to users
       devOptions: {
-        enabled: false, // PWA in dev mode (set true only for testing)
+        enabled: false,
       },
     }),
   ],
