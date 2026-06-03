@@ -9,7 +9,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── Safe Area Variables (iPhone notch / Android gestures) ── */
+/* ── Safe Area Variables ── */
 html {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -37,13 +37,11 @@ html {
   --shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
   --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.15);
   
-  /* Layout dimensions */
   --sidebar-width: 260px;
   --sidebar-collapsed: 68px;
   --mobile-header-height: 56px;
   --bottom-nav-height: 64px;
   
-  /* Animation */
   --transition-fast: 0.15s ease;
   --transition: 0.25s ease;
 }
@@ -80,10 +78,13 @@ html {
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
+/* ━━━ CRITICAL FIX: Prevent horizontal overflow globally ━━━ */
 html,
 body,
 #root {
   height: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 body {
@@ -95,7 +96,6 @@ body {
   overscroll-behavior: none;
 }
 
-/* Lock scroll when drawer open */
 body.drawer-open {
   overflow: hidden;
 }
@@ -247,6 +247,9 @@ img {
   display: flex;
   min-height: 100vh;
   position: relative;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 /* ═══════════════════════════════════════════
@@ -417,10 +420,12 @@ img {
   padding: 28px;
   background: var(--bg);
   transition: margin-left var(--transition);
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* ═══════════════════════════════════════════
-   MOBILE HEADER (hidden on desktop)
+   MOBILE HEADER
    ═══════════════════════════════════════════ */
 .mobile-header {
   display: none;
@@ -489,7 +494,7 @@ img {
 }
 
 /* ═══════════════════════════════════════════
-   BOTTOM NAV (Mobile Only)
+   BOTTOM NAV
    ═══════════════════════════════════════════ */
 .bottom-nav {
   display: none;
@@ -528,7 +533,7 @@ img {
   transform: scale(0.95);
 }
 
-/* FAB (Floating Action Button - Add) */
+/* FAB */
 .fab-add {
   position: absolute;
   top: -22px;
@@ -554,7 +559,6 @@ img {
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.6);
 }
 
-/* FAB Menu (when FAB clicked, options pop up) */
 .fab-menu {
   position: fixed;
   bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 16px);
@@ -619,7 +623,7 @@ img {
 }
 
 /* ═══════════════════════════════════════════
-   DRAWER (Hamburger Menu)
+   DRAWER
    ═══════════════════════════════════════════ */
 .drawer-overlay {
   position: fixed;
@@ -726,8 +730,9 @@ img {
 }
 
 /* ═══════════════════════════════════════════
-   PAGE HEADER
+   COMPONENTS
    ═══════════════════════════════════════════ */
+
 .page-header {
   display: flex;
   align-items: flex-start;
@@ -755,9 +760,6 @@ img {
   flex-wrap: wrap;
 }
 
-/* ═══════════════════════════════════════════
-   BUTTONS
-   ═══════════════════════════════════════════ */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -811,9 +813,6 @@ img {
   color: var(--text);
 }
 
-/* ═══════════════════════════════════════════
-   GRID
-   ═══════════════════════════════════════════ */
 .grid {
   display: grid;
   gap: 16px;
@@ -831,9 +830,6 @@ img {
   grid-template-columns: repeat(4, 1fr);
 }
 
-/* ═══════════════════════════════════════════
-   CARDS
-   ═══════════════════════════════════════════ */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -906,9 +902,6 @@ img {
   margin-top: 4px;
 }
 
-/* ═══════════════════════════════════════════
-   BADGES
-   ═══════════════════════════════════════════ */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -939,9 +932,6 @@ img {
   color: var(--danger);
 }
 
-/* ═══════════════════════════════════════════
-   COUNTRY CARD
-   ═══════════════════════════════════════════ */
 .country-title {
   font-size: 17px;
   font-weight: 800;
@@ -977,9 +967,6 @@ img {
   font-weight: 700;
 }
 
-/* ═══════════════════════════════════════════
-   SECTIONS
-   ═══════════════════════════════════════════ */
 .section-title {
   font-size: 16px;
   font-weight: 800;
@@ -987,9 +974,6 @@ img {
   letter-spacing: -0.02em;
 }
 
-/* ═══════════════════════════════════════════
-   TRANSACTIONS
-   ═══════════════════════════════════════════ */
 .transaction-list {
   display: grid;
   gap: 8px;
@@ -1045,9 +1029,6 @@ img {
   font-size: 14px;
 }
 
-/* ═══════════════════════════════════════════
-   PLACEHOLDER
-   ═══════════════════════════════════════════ */
 .placeholder-page {
   min-height: 70vh;
   display: grid;
@@ -1082,9 +1063,6 @@ img {
   line-height: 1.7;
 }
 
-/* ═══════════════════════════════════════════
-   FORM ELEMENTS
-   ═══════════════════════════════════════════ */
 .form-group {
   margin-bottom: 14px;
 }
@@ -1113,9 +1091,6 @@ img {
   border-color: var(--primary);
 }
 
-/* ═══════════════════════════════════════════
-   MODAL
-   ═══════════════════════════════════════════ */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1154,7 +1129,6 @@ img {
   border-top: 1px solid var(--border);
 }
 
-/* Hide scrollbar */
 .bottom-nav::-webkit-scrollbar {
   display: none;
 }
@@ -1163,7 +1137,7 @@ img {
    RESPONSIVE BREAKPOINTS
    ═══════════════════════════════════════════ */
 
-/* ── Tablet (768px - 1023px): Collapsible sidebar ── */
+/* ── Tablet (768px - 1023px) ── */
 @media (min-width: 768px) and (max-width: 1023px) {
   .sidebar {
     width: var(--sidebar-collapsed);
@@ -1221,7 +1195,9 @@ img {
   }
 }
 
-/* ── Mobile (≤767px): Bottom nav + drawer ── */
+/* ═══════════════════════════════════════════
+   MOBILE (≤767px) — KEY FIXES
+   ═══════════════════════════════════════════ */
 @media (max-width: 767px) {
   /* Hide desktop sidebar */
   .sidebar {
@@ -1256,13 +1232,61 @@ img {
     position: relative;
   }
   
-  /* Adjust main content */
+  /* ━━━ CRITICAL: Force content to viewport ━━━ */
   .main-content {
-    margin-left: 0;
-    padding: 16px;
-    padding-top: calc(var(--mobile-header-height) + var(--safe-top) + 12px);
-    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 20px);
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding: 0 !important;
+    padding-top: calc(var(--mobile-header-height) + var(--safe-top) + 8px) !important;
+    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 20px) !important;
     min-height: 100vh;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+  
+  /* ━━━ Override inline maxWidth on all pages ━━━ */
+  .main-content > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    box-sizing: border-box !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+  
+  /* Override inline maxWidth styles */
+  .main-content > div[style*="maxWidth"],
+  .main-content > div[style*="max-width"] {
+    max-width: 100% !important;
+  }
+  
+  /* Force all nested grids to fit */
+  .main-content [style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* But allow specific small column layouts */
+  .main-content [style*="gridTemplateColumns: repeat(2"],
+  .main-content [style*="gridTemplateColumns: \"1fr 1fr\""],
+  .main-content [style*="gridTemplateColumns: '1fr 1fr'"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  
+  /* Prevent any element from overflowing */
+  .main-content * {
+    max-width: 100%;
+  }
+  
+  /* Allow flex items to shrink */
+  .main-content [style*="display: flex"] {
+    flex-wrap: wrap;
+  }
+  
+  /* But preserve specific flex layouts */
+  .main-content [style*="display: flex"][style*="flexShrink"] {
+    flex-wrap: nowrap;
   }
   
   /* Mobile grid adjustments */
@@ -1279,15 +1303,23 @@ img {
     font-size: 22px;
   }
   
+  h1 {
+    font-size: 22px !important;
+  }
+  
+  h2 {
+    font-size: 18px !important;
+  }
+  
   /* Smaller cards on mobile */
   .card {
-    padding: 16px;
-    border-radius: 16px;
+    padding: 14px;
+    border-radius: 14px;
   }
   
   .stat-card {
-    padding: 16px;
-    border-radius: 16px;
+    padding: 14px;
+    border-radius: 14px;
   }
   
   /* Touch-friendly buttons */
@@ -1301,9 +1333,30 @@ img {
     font-size: 15px;
     min-height: 44px;
   }
+  
+  /* Prevent horizontal scroll */
+  html, body, #root, .app-layout {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Tables responsive */
+  table {
+    width: 100%;
+    table-layout: auto;
+    word-break: break-word;
+  }
+  
+  /* Long text wrapping */
+  .main-content {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
 }
 
-/* ── Small Mobile (≤480px): Single column ── */
+/* ═══════════════════════════════════════════
+   SMALL MOBILE (≤480px)
+   ═══════════════════════════════════════════ */
 @media (max-width: 480px) {
   :root {
     --bottom-nav-height: 60px;
@@ -1315,15 +1368,15 @@ img {
     grid-template-columns: 1fr;
   }
   
-  .main-content {
-    padding: 12px;
-    padding-top: calc(var(--mobile-header-height) + var(--safe-top) + 8px);
-    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 16px);
+  .main-content > div {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
   }
   
   .card,
   .stat-card {
-    padding: 14px;
+    padding: 12px;
+    border-radius: 12px;
   }
   
   .bottom-nav-link span {
@@ -1345,9 +1398,21 @@ img {
     border-radius: 20px 20px 0 0;
     max-height: 95vh;
   }
+  
+  /* Reduce font sizes slightly */
+  .stat-amount {
+    font-size: 22px;
+  }
+  
+  .page-title,
+  h1 {
+    font-size: 20px !important;
+  }
 }
 
-/* ── Landscape Mobile (small height) ── */
+/* ═══════════════════════════════════════════
+   LANDSCAPE MOBILE
+   ═══════════════════════════════════════════ */
 @media (max-width: 767px) and (orientation: landscape) and (max-height: 500px) {
   :root {
     --mobile-header-height: 44px;
@@ -1366,10 +1431,11 @@ img {
   }
 }
 
-/* ── PWA Standalone Mode ── */
+/* ═══════════════════════════════════════════
+   PWA STANDALONE MODE
+   ═══════════════════════════════════════════ */
 @media (display-mode: standalone) {
   .mobile-header {
-    /* Extra padding for status bar */
     height: calc(var(--mobile-header-height) + var(--safe-top));
   }
 }
