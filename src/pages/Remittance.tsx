@@ -24,6 +24,7 @@ import {
   where,
   orderBy,
   getDocs,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
@@ -89,6 +90,18 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 6,
 };
 
+// ─── Helper: Clean payload (remove undefined) ────────────────────────────────
+function cleanPayload(obj: Record<string, any>): Record<string, any> {
+  const cleaned: Record<string, any> = {};
+  Object.keys(obj).forEach(key => {
+    const val = obj[key];
+    if (val !== undefined) {
+      cleaned[key] = val === '' ? null : val;
+    }
+  });
+  return cleaned;
+}
+
 export default function Remittance({ user }: Props) {
   const [items, setItems]               = useState<Remittance[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -111,6 +124,7 @@ export default function Remittance({ user }: Props) {
 
   // ── Listeners ──
   useEffect(() => {
+    if (!user?.uid) return;
     const q = query(
       collection(db, 'remittances'),
       where('userId', '==', user.uid)
@@ -122,23 +136,28 @@ export default function Remittance({ user }: Props) {
         (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
       );
       setItems(list);
+    }, (err) => {
+      console.error('[Remittance] Listener error:', err);
     });
-  }, [user.uid]);
+  }, [user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
+    // FIXED: Removed orderBy to avoid index requirement
     const q = query(
       collection(db, 'paymentMethods'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
+      where('userId', '==', user.uid)
     );
     return onSnapshot(q, (snap) => {
       setPaymentMethods(
         snap.docs
           .map((d) => ({ id: d.id, ...d.data() } as PaymentMethod))
-          .filter((pm) => pm.id)
+          .filter((pm) => pm.id && !(pm as any).isDeleted)
       );
+    }, (err) => {
+      console.error('[Remittance] PaymentMethods listener error:', err);
     });
-  }, [user.uid]);
+  }, [user?.uid]);
 
   // ── Auto-calculate INR received ──
   useEffect(() => {
@@ -209,7 +228,7 @@ export default function Remittance({ user }: Props) {
   const worstRate = items.length
     ? Math.min(...items.map((i) => i.exchangeRate)) : 0;
 
-  // ── Save ──
+  // ── Save ─────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     const sent     = parseFloat(amountSentAED);
     const rate     = parseFloat(exchangeRate);
@@ -217,6 +236,7 @@ export default function Remittance({ user }: Props) {
     const received = parseFloat(amountReceivedINR);
     const netAED   = sent - fee;
 
+    // Validation
     if (!amountSentAED || sent <= 0) {
       toast.error('Enter valid AED amount'); return;
     }
@@ -230,168 +250,228 @@ export default function Remittance({ user }: Props) {
     if (!sentVia.trim()) {
       toast.error('Enter service provider (e.g. Al Ansari)'); return;
     }
+    if (!fromAccountId) {
+      toast.error('Select FROM account (UAE)'); return;
+    }
 
-    const fromMethod = fromAccountId ? getMethodById(fromAccountId) : null;
-    const toMethod   = toAccountId   ? getMethodById(toAccountId)   : null;
+    const fromMethod = getMethodById(fromAccountId);
+    const toMethod   = toAccountId ? getMethodById(toAccountId) : null;
 
-    // Guaranteed safely extracted variables for Firebase insertion
-    const fromName = fromMethod ? fromMethod.name : null;
-    const fromType = fromMethod ? fromMethod.type : null;
-    const toName = toMethod ? toMethod.name : null;
-    const toType = toMethod ? toMethod.type : null;
+    if (!fromMethod) {
+      toast.error('From account not found'); return;
+    }
 
     setSaving(true);
     try {
-      const data = {
+      // ━━━ STEP 1: Save/Update Remittance Record ━━━
+      const remittanceData = cleanPayload({
         userId: user.uid,
         amountSentAED: sent,
         exchangeRate: rate,
         transferFeeAED: fee,
         amountReceivedINR: received,
         sentVia: sentVia.trim(),
-        fromAccountId: fromAccountId || null,
-        fromAccountName: fromName,
+        fromAccountId: fromAccountId,
+        fromAccountName: fromMethod.name,
         toAccountId: toAccountId || null,
-        toAccountName: toName,
-        date,
-        note: note.trim() === '' ? null : note.trim(),
-      };
+        toAccountName: toMethod?.name || null,
+        date: date,
+        note: note.trim() || null,
+      });
 
-      let remId = editingItem?.id || null;
+      let remId: string;
 
-      if (remId) {
-        await updateDoc(doc(db, 'remittances', remId), data);
-        const oldTxsQuery = query(collection(db, 'transactions'), where('remittanceId', '==', remId));
+      if (editingItem?.id) {
+        // UPDATE existing
+        remId = editingItem.id;
+        await updateDoc(doc(db, 'remittances', remId), {
+          ...remittanceData,
+          updatedAt: serverTimestamp(),
+        });
+        
+        // Delete old linked transactions
+        const oldTxsQuery = query(
+          collection(db, 'transactions'),
+          where('userId', '==', user.uid),
+          where('remittanceId', '==', remId)
+        );
         const oldTxsSnap = await getDocs(oldTxsQuery);
-        const deletePromises = oldTxsSnap.docs.map(d => deleteDoc(d.ref));
-        await Promise.all(deletePromises);
+        
+        // Use batch for delete
+        if (oldTxsSnap.size > 0) {
+          const batch = writeBatch(db);
+          oldTxsSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
       } else {
+        // CREATE new
         const docRef = await addDoc(collection(db, 'remittances'), {
-          ...data,
+          ...remittanceData,
           createdAt: serverTimestamp(),
         });
         remId = docRef.id;
       }
 
-      // ✅ PATCH: Transfer/Expense Split Logic
-      if (fromAccountId) {
-        // 1. Fee is ALWAYS an expense
-        if (fee > 0) {
-          await addDoc(collection(db, 'transactions'), {
-            userId: user.uid,
-            type: 'expense',
-            amount: fee,
-            currency: 'AED',
-            country: 'UAE',
-            category: 'Bank Fees',
-            paymentMethodId: fromAccountId || null,
-            paymentMethod: fromType,
-            paymentMethodName: fromName,
-            paymentMethodType: fromType,
-            note: `Transfer fee for ${sentVia.trim()}`,
-            date: date || getToday(),
-            isRemittanceFee: true,
-            remittanceId: remId || null,
-            createdAt: serverTimestamp(),
-          });
-        }
+      // ━━━ STEP 2: Create Linked Transactions ━━━
+      // All transactions use writeBatch for atomicity
+      const batch = writeBatch(db);
+      const txCollection = collection(db, 'transactions');
 
-        if (toAccountId) {
-          // 2a. TRANSFER to OWN Account: Deduct AED as a "Transfer Out"
-          if (netAED > 0) {
-            await addDoc(collection(db, 'transactions'), {
-              userId: user.uid,
-              type: 'transfer',
-              amount: netAED,
-              currency: 'AED',
-              country: 'UAE',
-              category: 'Remittance',
-              fromMethod: fromAccountId || null,
-              toMethod: sentVia.trim() || 'Exchange', // Pseudo-account for display
-              note: `Sent to India via ${sentVia.trim()}`,
-              date: date || getToday(),
-              remittanceId: remId || null,
-              createdAt: serverTimestamp(),
-            });
-          }
-        } else {
-          // 2b. SENT TO OTHERS: Deduct AED as an "Expense"
-          if (netAED > 0) {
-            await addDoc(collection(db, 'transactions'), {
-              userId: user.uid,
-              type: 'expense',
-              amount: netAED,
-              currency: 'AED',
-              country: 'UAE',
-              category: 'Remittance',
-              paymentMethodId: fromAccountId || null,
-              paymentMethod: fromType,
-              paymentMethodName: fromName,
-              paymentMethodType: fromType,
-              note: `Remittance to others via ${sentVia.trim()}${note.trim() ? ' · ' + note.trim() : ''}`,
-              date: date || getToday(),
-              isRemittance: true,
-              remittanceId: remId || null,
-              createdAt: serverTimestamp(),
-            });
-          }
-        }
+      // 2a. Transfer Fee → Expense
+      if (fee > 0) {
+        const feeTxRef = doc(txCollection);
+        batch.set(feeTxRef, cleanPayload({
+          userId: user.uid,
+          type: 'expense',
+          amount: fee,
+          currency: 'AED',
+          country: 'UAE',
+          category: 'Bank Fees',
+          categoryName: 'Bank Fees',
+          paymentMethodId: fromAccountId,
+          paymentMethod: fromMethod.type,
+          paymentMethodName: fromMethod.name,
+          paymentMethodType: fromMethod.type,
+          note: `Transfer fee for ${sentVia.trim()}`,
+          date: date,
+          isRemittanceFee: true,
+          remittanceId: remId,
+          debitAccountId: '5040', // Bank Fees GL
+          creditAccountId: fromAccountId,
+          createdAt: serverTimestamp(),
+        }));
       }
 
-      // 3. TRANSFER to OWN Account: Add INR as a "Transfer In"
-      if (toAccountId) {
-        if (received > 0) {
-          await addDoc(collection(db, 'transactions'), {
+      // 2b. AED Deduction (Net Amount)
+      if (netAED > 0) {
+        if (toAccountId && toMethod) {
+          // ━━━ TRANSFER to OWN account ━━━
+          // Deduct AED from UAE account
+          const debitTxRef = doc(txCollection);
+          batch.set(debitTxRef, cleanPayload({
             userId: user.uid,
-            type: 'transfer',
+            type: 'expense', // ← Use expense, not transfer (different currencies)
+            amount: netAED,
+            currency: 'AED',
+            country: 'UAE',
+            category: 'Remittance',
+            categoryName: 'Remittance',
+            paymentMethodId: fromAccountId,
+            paymentMethod: fromMethod.type,
+            paymentMethodName: fromMethod.name,
+            paymentMethodType: fromMethod.type,
+            note: `Sent to ${toMethod.name} via ${sentVia.trim()}`,
+            date: date,
+            isRemittance: true,
+            remittanceId: remId,
+            debitAccountId: '1100', // Investments/Transfer
+            creditAccountId: fromAccountId,
+            createdAt: serverTimestamp(),
+          }));
+
+          // Add INR to India account
+          const creditTxRef = doc(txCollection);
+          batch.set(creditTxRef, cleanPayload({
+            userId: user.uid,
+            type: 'income', // ← Use income for INR received
             amount: received,
             currency: 'INR',
             country: 'India',
             category: 'Remittance',
-            fromMethod: sentVia.trim() || 'Exchange',
-            toMethod: toAccountId || null,
-            note: `Received remittance via ${sentVia.trim()}`,
-            date: date || getToday(),
-            remittanceId: remId || null,
+            categoryName: 'Remittance Received',
+            paymentMethodId: toAccountId,
+            paymentMethod: toMethod.type,
+            paymentMethodName: toMethod.name,
+            paymentMethodType: toMethod.type,
+            note: `Received from UAE via ${sentVia.trim()}`,
+            date: date,
+            isRemittance: true,
+            remittanceId: remId,
+            debitAccountId: toAccountId,
+            creditAccountId: '1100',
             createdAt: serverTimestamp(),
-          });
+          }));
+        } else {
+          // ━━━ SENT to OTHERS (no destination account) ━━━
+          const expTxRef = doc(txCollection);
+          batch.set(expTxRef, cleanPayload({
+            userId: user.uid,
+            type: 'expense',
+            amount: netAED,
+            currency: 'AED',
+            country: 'UAE',
+            category: 'Remittance',
+            categoryName: 'Remittance',
+            paymentMethodId: fromAccountId,
+            paymentMethod: fromMethod.type,
+            paymentMethodName: fromMethod.name,
+            paymentMethodType: fromMethod.type,
+            note: `Remittance via ${sentVia.trim()}${note.trim() ? ' · ' + note.trim() : ''}`,
+            date: date,
+            isRemittance: true,
+            remittanceId: remId,
+            debitAccountId: '5090', // Other Expense
+            creditAccountId: fromAccountId,
+            createdAt: serverTimestamp(),
+          }));
         }
       }
 
-      if (editingItem?.id) {
-         toast.success('Remittance and linked accounts updated!');
-      } else {
-         toast.success('Remittance saved! Balances updated.');
-      }
+      // Commit all transactions atomically
+      await batch.commit();
+
+      toast.success(
+        editingItem
+          ? '✅ Remittance updated! Balances synced.'
+          : '💸 Remittance saved! Balances updated.'
+      );
       
       setShowModal(false);
       resetForm();
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to save remittance');
+    } catch (error: any) {
+      console.error('[Remittance] Save error:', error);
+      const errMsg = error?.code === 'permission-denied'
+        ? 'Permission denied. Check Firestore rules.'
+        : error?.message || 'Failed to save remittance';
+      toast.error(errMsg);
     } finally {
       setSaving(false);
     }
   };
 
+  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this remittance record?')) return;
+    if (!confirm('Delete this remittance record? All linked transactions will be removed.')) return;
     try {
-      await deleteDoc(doc(db, 'remittances', id));
-      
-      const oldTxsQuery = query(collection(db, 'transactions'), where('remittanceId', '==', id));
+      // Use batch for atomicity
+      const batch = writeBatch(db);
+
+      // Delete linked transactions first
+      const oldTxsQuery = query(
+        collection(db, 'transactions'),
+        where('userId', '==', user.uid),
+        where('remittanceId', '==', id)
+      );
       const oldTxsSnap = await getDocs(oldTxsQuery);
-      const deletePromises = oldTxsSnap.docs.map(d => deleteDoc(d.ref));
-      await Promise.all(deletePromises);
+      oldTxsSnap.docs.forEach(d => batch.delete(d.ref));
+
+      // Delete remittance
+      batch.delete(doc(db, 'remittances', id));
+
+      // Commit all
+      await batch.commit();
       
-      toast.success('Deleted!');
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to delete');
+      toast.success('🗑️ Remittance & linked transactions deleted');
+    } catch (error: any) {
+      console.error('[Remittance] Delete error:', error);
+      const errMsg = error?.code === 'permission-denied'
+        ? 'Permission denied. Check Firestore rules.'
+        : error?.message || 'Failed to delete';
+      toast.error(errMsg);
     }
   };
 
-  // ── Account Selector Component ──
+  // ── Account Selector Component ────────────────────────────────────────────
   const AccountSelector = ({
     label,
     methods,
@@ -422,13 +502,12 @@ export default function Remittance({ user }: Props) {
           gridTemplateColumns: 'repeat(2, 1fr)',
           gap: 8,
         }}>
-          {/* None option */}
           <button
             type="button"
             onClick={() => onChange('')}
             style={{
               padding: '9px 12px', borderRadius: 12, cursor: 'pointer',
-              border: `2px solid ${value === '' ? 'var(--border)' : 'var(--border)'}`,
+              border: `2px solid var(--border)`,
               background: value === '' ? 'var(--bg)' : 'transparent',
               color: 'var(--muted)', fontSize: 12, fontWeight: 600,
               display: 'flex', alignItems: 'center', gap: 6,
@@ -469,14 +548,14 @@ export default function Remittance({ user }: Props) {
     </div>
   );
 
-  // ── Render ──
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ color: 'var(--text)', padding: '4px 0' }}>
 
       {/* Header */}
       <div className="page-header" style={{
         display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', marginBottom: 24,
+        alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12,
       }}>
         <div>
           <h1 className="page-title" style={{
@@ -653,7 +732,6 @@ export default function Remittance({ user }: Props) {
                 background: 'var(--card)', border: '1px solid var(--border)',
                 borderRadius: 18, padding: 18,
               }}>
-                {/* Card header */}
                 <div style={{
                   display: 'flex', justifyContent: 'space-between',
                   alignItems: 'flex-start', marginBottom: 14,
@@ -688,7 +766,6 @@ export default function Remittance({ user }: Props) {
                   </div>
                 </div>
 
-                {/* From → To Account display */}
                 {(item.fromAccountName || item.toAccountName) && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -713,7 +790,6 @@ export default function Remittance({ user }: Props) {
                   </div>
                 )}
 
-                {/* Amount details */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                     <span style={{ color: 'var(--muted)' }}>Amount Sent</span>
@@ -783,7 +859,6 @@ export default function Remittance({ user }: Props) {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal header */}
             <div style={{
               display: 'flex', justifyContent: 'space-between',
               alignItems: 'center', marginBottom: 20,
@@ -807,16 +882,14 @@ export default function Remittance({ user }: Props) {
               </button>
             </div>
 
-            {/* From Account (UAE) */}
             <AccountSelector
-              label="From Account (UAE — AED deducted)"
+              label="From Account (UAE — AED deducted) *"
               methods={uaeMethods}
               value={fromAccountId}
               onChange={setFromAccountId}
               emptyMsg="No UAE accounts. Add in Cards page."
             />
 
-            {/* To Account (India) */}
             <AccountSelector
               label="To Account (India — INR credited)"
               methods={indiaMethods}
@@ -825,13 +898,11 @@ export default function Remittance({ user }: Props) {
               emptyMsg="No India accounts. Add in Cards page."
             />
 
-            {/* Divider */}
             <div style={{
               height: 1, background: 'var(--border)',
               margin: '4px 0 16px',
             }} />
 
-            {/* Amount fields */}
             <div style={{
               display: 'grid', gridTemplateColumns: '1fr 1fr',
               gap: 12, marginBottom: 12,
@@ -897,7 +968,6 @@ export default function Remittance({ user }: Props) {
               </div>
             </div>
 
-            {/* Auto-calc preview */}
             {!manualReceived && amountSentAED && exchangeRate && (
               <div style={{
                 padding: '10px 14px', borderRadius: 12,
@@ -917,19 +987,17 @@ export default function Remittance({ user }: Props) {
               </div>
             )}
 
-            {/* Sent Via */}
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Sent Via (Service Provider) *</label>
               <input
                 type="text"
-                placeholder="e.g. Al Ansari, Lulu Exchange, Wise, Western Union"
+                placeholder="e.g. Al Ansari, Lulu Exchange, Wise"
                 value={sentVia}
                 onChange={(e) => setSentVia(e.target.value)}
                 style={inputStyle}
               />
             </div>
 
-            {/* Date */}
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Transfer Date *</label>
               <input
@@ -939,20 +1007,18 @@ export default function Remittance({ user }: Props) {
               />
             </div>
 
-            {/* Note */}
             <div style={{ marginBottom: 20 }}>
               <label style={labelStyle}>Note (Optional)</label>
               <input
                 type="text"
-                placeholder="e.g. Monthly family transfer, emergency funds"
+                placeholder="e.g. Monthly family transfer"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 style={inputStyle}
               />
             </div>
 
-            {/* Balance update notice */}
-            {!editingItem && (fromAccountId || toAccountId) && (
+            {(fromAccountId || toAccountId) && (
               <div style={{
                 padding: '10px 14px', borderRadius: 12, marginBottom: 14,
                 background: 'rgba(99,102,241,0.08)',
