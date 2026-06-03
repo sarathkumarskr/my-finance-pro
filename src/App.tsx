@@ -12,6 +12,7 @@ import type { User } from 'firebase/auth';
 import { auth } from './firebaseConfig';
 import Login from './pages/Login';
 import Layout from './components/Layout';
+import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 
 interface AppProps {
   onReady?: () => void;
@@ -109,7 +110,7 @@ export default function App({ onReady }: AppProps) {
     }
   }
 
-  // Online/offline detection
+  // ── Online/offline detection ─────────────────────────────────────────────
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
     const goOffline = () => setIsOnline(false);
@@ -121,7 +122,7 @@ export default function App({ onReady }: AppProps) {
     };
   }, []);
 
-  // Auth state listener
+  // ── Auth state listener ───────────────────────────────────────────────────
   useEffect(() => {
     timeoutRef.current = setTimeout(() => {
       console.warn('[Auth] Timeout! Showing login.');
@@ -160,7 +161,7 @@ export default function App({ onReady }: AppProps) {
     };
   }, []);
 
-  // Re-check on tab focus
+  // ── Re-check on tab focus ────────────────────────────────────────────────
   useEffect(() => {
     const check = () => {
       if (document.visibilityState === 'visible') {
@@ -171,13 +172,14 @@ export default function App({ onReady }: AppProps) {
     return () => document.removeEventListener('visibilitychange', check);
   }, []);
 
-  // Loading state
+  // ── Loading state ────────────────────────────────────────────────────────
   if (user === undefined) {
     return <Spinner />;
   }
 
   return (
     <BrowserRouter>
+      {/* Offline banner */}
       {!isOnline && (
         <div
           style={{
@@ -207,7 +209,7 @@ export default function App({ onReady }: AppProps) {
           }
         />
 
-        {/* All other routes go through Layout (which has its own routes inside) */}
+        {/* All authenticated routes go through Layout */}
         <Route
           path="/*"
           element={
@@ -217,6 +219,9 @@ export default function App({ onReady }: AppProps) {
           }
         />
       </Routes>
+
+      {/* 🆕 PWA Update Notification — shows toast when new version deployed */}
+      <PWAUpdatePrompt />
     </BrowserRouter>
   );
 }
