@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Generator</title></head>
+<body>
+<canvas id="canvas" width="512" height="512"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// Background gradient
+const gradient = ctx.createLinearGradient(0, 0, 512, 512);
+gradient.addColorStop(0, '#6366f1');
+gradient.addColorStop(1, '#8b5cf6');
+ctx.fillStyle = gradient;
+ctx.fillRect(0, 0, 512, 512);
+
+// White M letter
+ctx.fillStyle = 'white';
+ctx.font = 'bold 320px Arial';
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.fillText('M', 256, 280);
+
+// Download
+const link = document.createElement('a');
+link.download = 'icon-512.png';
+link.href = canvas.toDataURL();
+document.body.appendChild(link);
+link.textContent = 'Download Icon';
+</script>
+</body>
+</html>
