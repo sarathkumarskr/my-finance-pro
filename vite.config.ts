@@ -7,38 +7,27 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'inline',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      injectRegister: 'auto',
+      
+      includeAssets: [
+        'favicon.ico',
+        'apple-touch-icon.png',
+        'icon-192.png',
+        'icon-512.png',
+      ],
       
       manifest: {
-        // ── App Identity ──
         name: 'My Finance Pro',
         short_name: 'Finance Pro',
         description: 'UAE-India Personal ERP & Finance Tracker',
-        
-        // ── KEY: These remove URL bar ──
-        display: 'standalone',           // ← No browser UI
-        display_override: ['standalone', 'fullscreen'],  // ← Fallback options
-        
-        // ── Visual ──
-        theme_color: '#6366f1',          // Top bar color (Android)
-        background_color: '#0f1219',     // Splash screen bg
-        
-        // ── Orientation ──
-        orientation: 'portrait-primary',  // Or 'any' if you want rotation
-        
-        // ── Scope (important for routing) ──
+        theme_color: '#6366f1',
+        background_color: '#0f1219',
+        display: 'standalone',
+        orientation: 'portrait',
         scope: '/',
-        start_url: '/?source=pwa',       // Track PWA opens
-        
-        // ── Categories ──
-        categories: ['finance', 'productivity', 'business'],
-        
-        // ── Language ──
+        start_url: '/',
         lang: 'en',
-        dir: 'ltr',
-        
-        // ── Icons ──
+        categories: ['finance', 'productivity', 'business'],
         icons: [
           {
             src: '/icon-192.png',
@@ -65,54 +54,14 @@ export default defineConfig({
             purpose: 'maskable',
           },
         ],
-        
-        // ── Shortcuts (long-press app icon) ──
-        shortcuts: [
-          {
-            name: 'Add Expense',
-            short_name: 'Expense',
-            description: 'Quickly add an expense',
-            url: '/expenses?action=add',
-            icons: [{ src: '/icon-192.png', sizes: '192x192' }],
-          },
-          {
-            name: 'Add Income',
-            short_name: 'Income',
-            description: 'Record income',
-            url: '/income?action=add',
-            icons: [{ src: '/icon-192.png', sizes: '192x192' }],
-          },
-          {
-            name: 'View Reports',
-            short_name: 'Reports',
-            description: 'See financial reports',
-            url: '/reports',
-            icons: [{ src: '/icon-192.png', sizes: '192x192' }],
-          },
-        ],
-        
-        // ── Screenshots (Android install dialog) ──
-        screenshots: [
-          {
-            src: '/screenshot-mobile.png',
-            sizes: '720x1280',
-            type: 'image/png',
-            form_factor: 'narrow',
-            label: 'Dashboard view',
-          },
-        ],
-        
-        // ── Prevent browser fallback ──
-        prefer_related_applications: false,
       },
       
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,json,webmanifest}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
-        
-        // Network-first for live data
+        navigateFallback: '/index.html',
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/firestore\.googleapis\.com/,
